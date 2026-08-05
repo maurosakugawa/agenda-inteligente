@@ -1,0 +1,50 @@
+/**
+ * Tema customizado
+ */
+
+/* =========================
+   LIGHT
+========================= */
+
+[data-theme="light"] {
+  --header-bg: #f1f5f9;
+  --search-bg: #fffff4;
+  --search-text: #0f172a;
+}
+
+/* =========================
+   DARK
+========================= */
+
+[data-theme="dark"] {
+  --header-bg: #240046;
+  --search-bg: #334155;
+  --search-text: #f1f5f9;
+}
+
+/* =========================
+   UTILITIES
+========================= */
+
+.glass {
+  backdrop-filter: blur(20px);
+}
+
+.gradient-header {
+  background: linear-gradient(
+    90deg,
+    #1a1333 0%,
+    #1b1b3a 50%,
+    #111827 100%
+  );
+}
+
+.dashboard-bg {
+  background:
+    radial-gradient(
+      circle at top,
+      rgba(124, 58, 237, 0.12),
+      transparent 30%
+    ),
+    #0b1120;
+}

@@ -1,0 +1,22 @@
+@import "./styles/theme.css";
+@import "./styles/calendar.css";
+@import "./styles/animations.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  @apply bg-base-100 text-base-content;
+}
+
+html[data-theme="dark"] body {
+  @apply bg-[#0b1120] text-white;
+}

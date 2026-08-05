@@ -1,0 +1,40 @@
+/* src/styles/calendar.css */
+
+.rbc-calendar {
+  background: transparent;
+  color: inherit;
+}
+
+.rbc-toolbar button {
+  border-radius: 1rem;
+}
+
+.rbc-event {
+  border: none;
+  border-radius: 0.8rem;
+  padding: 4px 8px;
+}
+
+.rbc-today {
+  background: rgba(124, 58, 237, 0.12);
+}
+
+.rbc-toolbar-label {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+/* Views semana/dia */
+.rbc-time-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.rbc-time-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.rbc-timeslot-group {
+  min-height: 80px;
+}
