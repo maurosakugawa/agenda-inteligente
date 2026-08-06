@@ -287,6 +287,34 @@ O diretório de sessões deverá ser:
 
 A aplicação não deverá salvar arquivos de sessão dentro de `public_html` ou de qualquer diretório servido pelo Apache.
 
+### Retenção física e garbage collection
+
+Os limites de expiração definidos pela aplicação não deverão ser antecipados pela coleta automática de lixo do PHP.
+
+Quando o handler nativo de arquivos for utilizado, a configuração deverá garantir que:
+
+```text
+session.gc_maxlifetime >= session.idle_timeout
+```
+
+Na configuração inicial proposta, isso significa que o armazenamento físico deverá ser capaz de reter uma sessão inativa por pelo menos 30 minutos.
+
+Sempre que a hospedagem permitir configuração em tempo de execução, o backend deverá ajustar `session.gc_maxlifetime` antes de iniciar a sessão.
+
+O diretório de sessões deverá preferencialmente ser exclusivo da aplicação, evitando que outras aplicações com políticas diferentes de garbage collection interfiram nesses arquivos.
+
+Caso a hospedagem compartilhada não permita controle confiável do garbage collector global, deverá ser utilizado um `session.save_path` isolado ou outro mecanismo de armazenamento que ofereça retenção equivalente.
+
+A existência física do arquivo não determinará a validade da sessão.
+
+Os timestamps mantidos pela aplicação continuarão sendo a autoridade para:
+
+- expiração por inatividade;
+- expiração absoluta;
+- rejeição de sessões expiradas.
+
+Assim, o garbage collector será responsável somente pela liberação posterior do armazenamento e não pela regra de autenticação.
+
 ## Dados permitidos na sessão
 
 A sessão deverá conter somente dados necessários à autenticação e segurança.
@@ -535,12 +563,14 @@ Exemplo:
 
 ```json
 {
-  "user": {
-    "id": 123,
-    "username": "usuario"
-  }
+  "id": 123,
+  "username": "usuario"
 }
 ```
+
+Esse formato preserva o contrato existente de `GET /auth/me` e permite que o frontend restaure diretamente o usuário autenticado sem um wrapper adicional.
+
+A resposta de login poderá continuar utilizando o campo `user`, pois constitui um contrato diferente.
 
 Quando não autenticado:
 
@@ -568,8 +598,8 @@ A sessão terá dois limites:
 Valores iniciais propostos:
 
 ```text
-Inatividade máxima: 2 horas
-Duração absoluta: 24 horas
+Inatividade máxima: 30 minutos
+Duração absoluta: 8 horas
 ```
 
 Os valores deverão ser configuráveis.

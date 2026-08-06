@@ -229,6 +229,92 @@ $tests['extrai parâmetro de rota'] = static function (): void {
     );
 };
 
+$tests['rejeita parâmetro de rota com UTF-8 inválido'] = static function (): void {
+    $handlerExecutions = new ArrayObject();
+
+    $router = new Router();
+    $router->get(
+        '/api/contacts/{id}',
+        static function (
+            Request $request
+        ) use (
+            $handlerExecutions
+        ): JsonResponse {
+            $handlerExecutions->append(true);
+
+            return JsonResponse::success([]);
+        }
+    );
+
+    $response = $router->handle(
+        Request::create(
+            'GET',
+            '/api/contacts/%FF'
+        )
+    );
+
+    assertHttpSame(
+        400,
+        $response->statusCode(),
+        'O parâmetro com UTF-8 inválido não foi rejeitado.'
+    );
+
+    assertHttpSame(
+        'invalid_route_parameter',
+        $response->payload()['error']['code'] ?? null,
+        'O código do erro para parâmetro inválido está incorreto.'
+    );
+
+    assertHttpSame(
+        0,
+        $handlerExecutions->count(),
+        'O handler recebeu um parâmetro de rota inválido.'
+    );
+};
+
+$tests['rejeita percent-encoding inválido em parâmetro de rota'] = static function (): void {
+    $handlerExecutions = new ArrayObject();
+
+    $router = new Router();
+    $router->get(
+        '/api/contacts/{id}',
+        static function (
+            Request $request
+        ) use (
+            $handlerExecutions
+        ): JsonResponse {
+            $handlerExecutions->append(true);
+
+            return JsonResponse::success([]);
+        }
+    );
+
+    $response = $router->handle(
+        Request::create(
+            'GET',
+            '/api/contacts/%ZZ'
+        )
+    );
+
+    assertHttpSame(
+        400,
+        $response->statusCode(),
+        'O percent-encoding inválido não foi rejeitado.'
+    );
+
+    assertHttpSame(
+        'invalid_route_parameter',
+        $response->payload()['error']['code'] ?? null,
+        'O código do erro para percent-encoding inválido está incorreto.'
+    );
+
+    assertHttpSame(
+        0,
+        $handlerExecutions->count(),
+        'O handler recebeu percent-encoding inválido.'
+    );
+};
+
 $tests['retorna 404 para rota desconhecida'] = static function (): void {
     $router = new Router();
 

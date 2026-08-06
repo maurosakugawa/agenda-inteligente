@@ -550,7 +550,9 @@ X-CSRF-Token: <token>
 
 A estratégia definitiva deverá ser implementada de forma coordenada com o frontend.
 
-Rotas de login e registro deverão ser avaliadas separadamente quanto a CSRF, limitação de tentativas e abuso.
+As rotas `POST /auth/register`, `POST /auth/login` e `POST /auth/logout` deverão validar token CSRF conforme definido no ADR de sessão e CSRF.
+
+Registro e login também deverão receber proteção adicional contra tentativas repetidas e abuso.
 
 ## 18. Autorização e isolamento por usuário
 
@@ -1118,25 +1120,32 @@ Migrações destrutivas deverão ser evitadas até que exista uma estratégia se
 * tratamento global de erros;
 * `/health`.
 
-### Fase 2 — Autenticação e segurança de sessão
+### Fase 2 — Autenticação, sessão e CSRF mínimo
 
 * usuários;
+* cookies;
+* sessão anônima e autenticada;
+* `GET /auth/csrf`;
+* geração e armazenamento do token CSRF;
+* middleware de validação CSRF;
+* proteção CSRF de registro, login e logout;
 * registro;
 * login;
 * logout;
 * `/auth/me`;
 * middleware de autenticação;
-* cookies;
-* sessão;
+* regeneração da sessão após login;
 * proteção inicial contra abuso.
 
-### Fase 3 — CSRF e integração básica com o frontend
+Os endpoints mutáveis de autenticação não deverão ser disponibilizados antes que o fluxo mínimo de CSRF esteja funcional.
 
-* geração de token;
-* validação;
-* cabeçalho;
-* integração com o cliente HTTP;
-* testes das rotas mutáveis.
+### Fase 3 — Integração CSRF com o frontend
+
+* obtenção do token por `/auth/csrf`;
+* envio de `X-CSRF-Token` pelo cliente HTTP;
+* atualização ou nova obtenção do token após login;
+* política reutilizável para futuras rotas mutáveis;
+* testes de integração entre autenticação, sessão, CSRF e frontend.
 
 ### Fase 4 — Contatos
 

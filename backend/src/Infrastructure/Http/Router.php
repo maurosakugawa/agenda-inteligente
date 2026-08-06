@@ -72,9 +72,19 @@ final class Router implements RequestHandlerInterface
         $allowedMethods = [];
 
         foreach ($this->routes as $route) {
-            $routeParameters = $route->matchPath(
-                $request->path()
-            );
+            try {
+                $routeParameters = $route->matchPath(
+                    $request->path()
+                );
+            } catch (
+                InvalidRouteParameterException
+            ) {
+                return JsonResponse::error(
+                    'invalid_route_parameter',
+                    'Parâmetro de rota inválido.',
+                    400
+                );
+            }
 
             if ($routeParameters === null) {
                 continue;

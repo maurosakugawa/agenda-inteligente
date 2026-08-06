@@ -107,9 +107,43 @@ final class Route
         $parameters = [];
 
         foreach ($this->parameterNames as $name) {
-            $parameters[$name] = rawurldecode(
-                (string) ($matches[$name] ?? '')
+            $encodedParameter = (string) (
+                $matches[$name] ?? ''
             );
+
+            if (
+                preg_match(
+                    '/%(?![0-9A-Fa-f]{2})/',
+                    $encodedParameter
+                ) === 1
+            ) {
+                throw new InvalidRouteParameterException(
+                    sprintf(
+                        'O parâmetro de rota "%s" possui codificação percentual inválida.',
+                        $name
+                    )
+                );
+            }
+
+            $decodedParameter = rawurldecode(
+                $encodedParameter
+            );
+
+            if (
+                preg_match(
+                    '//u',
+                    $decodedParameter
+                ) !== 1
+            ) {
+                throw new InvalidRouteParameterException(
+                    sprintf(
+                        'O parâmetro de rota "%s" não contém UTF-8 válido.',
+                        $name
+                    )
+                );
+            }
+
+            $parameters[$name] = $decodedParameter;
         }
 
         return $parameters;
