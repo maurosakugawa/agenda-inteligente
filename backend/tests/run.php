@@ -172,6 +172,16 @@ $tests['aceita configuração válida'] = static function (): void {
     );
 };
 
+$tests['rejeita nome de sessão somente numérico'] = static function (): void {
+    $config = validConfig();
+    $config['session']['name'] = '123456';
+
+    assertConfigurationException(
+        static fn (): mixed => ConfigValidator::validate($config),
+        'session.name não pode conter somente números'
+    );
+};
+
 $tests['rejeita seção ausente'] = static function (): void {
     $config = validConfig();
     unset($config['database']);

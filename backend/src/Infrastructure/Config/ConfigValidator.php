@@ -151,6 +151,18 @@ final class ConfigValidator
             );
         }
 
+        if (
+            preg_match(
+                '/^[0-9]+$/D',
+                $sessionName
+            ) === 1
+        ) {
+            self::invalid(
+                'session.name',
+                'não pode conter somente números.'
+            );
+        }
+
         $sessionSecure = self::boolean(
             $session,
             'secure',

@@ -450,7 +450,6 @@ SELECT
     name,
     email,
     phone,
-    notes,
     created_at,
     updated_at
 FROM contacts
@@ -605,8 +604,7 @@ SELECT
     c.id,
     c.name,
     c.email,
-    c.phone,
-    c.notes
+    c.phone
 FROM event_contacts ec
 INNER JOIN contacts c
     ON c.id = ec.contact_id
@@ -628,8 +626,8 @@ Exemplo conceitual:
 SELECT
     e.id,
     e.title,
-    e.starts_at,
-    e.ends_at,
+    e.event_date,
+    e.event_time,
     e.location
 FROM event_contacts ec
 INNER JOIN events e
@@ -639,7 +637,10 @@ INNER JOIN contacts c
 WHERE ec.contact_id = :contact_id
   AND e.user_id = :user_id
   AND c.user_id = :user_id
-ORDER BY e.starts_at, e.id;
+ORDER BY
+    e.event_date,
+    e.event_time,
+    e.id;
 ```
 
 ## Resposta da API
