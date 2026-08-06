@@ -3,12 +3,12 @@
 declare(strict_types=1);
 
 use AgendaInteligente\Infrastructure\Config\ConfigLoader;
-use AgendaInteligente\Infrastructure\Database\Connection;
 
 require_once __DIR__ . '/autoload.php';
 
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
 ini_set('log_errors', '1');
 
 $configLoader = new ConfigLoader(
@@ -19,12 +19,8 @@ $configLoader = new ConfigLoader(
 $config = $configLoader->load();
 
 $timezone = (string) $config['app']['timezone'];
-date_default_timezone_set($timezone);
-
-$debug = (bool) $config['app']['debug'];
-ini_set(
-    'display_errors',
-    $debug ? '1' : '0'
+date_default_timezone_set(
+    $timezone
 );
 
 /**
@@ -39,11 +35,7 @@ ini_set(
  */
 $databaseConfig = $config['database'];
 
-$pdo = Connection::make(
-    $databaseConfig
-);
-
 return [
     'config' => $config,
-    'pdo' => $pdo,
+    'database' => $databaseConfig,
 ];

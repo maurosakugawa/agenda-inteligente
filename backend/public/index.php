@@ -2,45 +2,89 @@
 
 declare(strict_types=1);
 
-header('Content-Type: application/json; charset=utf-8');
-header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: strict-origin-when-cross-origin');
+use AgendaInteligente\Application\Health\HealthController;
+use AgendaInteligente\Application\HttpKernel;
+use AgendaInteligente\Infrastructure\Config\ConfigurationException;
+use AgendaInteligente\Infrastructure\Database\Connection;
+use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Request;
+use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
 
-$requestMethod = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
-$requestPath = parse_url(
-    (string) ($_SERVER['REQUEST_URI'] ?? '/'),
-    PHP_URL_PATH
-);
-$requestPath = is_string($requestPath) ? rtrim($requestPath, '/') : '/';
-$requestPath = $requestPath === '' ? '/' : $requestPath;
+require_once dirname(__DIR__) . '/autoload.php';
 
-if ($requestMethod === 'GET' && in_array($requestPath, ['/health', '/api/health'], true)) {
-    http_response_code(200);
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
+header_remove('X-Powered-By');
 
-    echo json_encode(
-        [
-            'success' => true,
-            'data' => [
-                'service' => 'agenda-inteligente-api',
-                'status' => 'ok',
-                'timestamp' => gmdate(DATE_ATOM),
-            ],
-        ],
-        JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+try {
+    /**
+     * @var array{
+     *     config:array<string, mixed>,
+     *     database:array{
+     *         host:string,
+     *         port:int,
+     *         database:string,
+     *         username:string,
+     *         password:string,
+     *         charset:string
+     *     }
+     * } $application
+     */
+    $application = require dirname(__DIR__) . '/bootstrap.php';
+
+    $databaseConfig = $application['database'];
+
+    $healthController = new HealthController(
+        static function () use (
+            $databaseConfig
+        ): void {
+            $pdo = Connection::make(
+                $databaseConfig
+            );
+
+            $statement = $pdo->query(
+                'SELECT 1'
+            );
+
+            if ($statement === false) {
+                throw new RuntimeException(
+                    'A consulta de saúde do banco falhou.'
+                );
+            }
+        }
     );
 
-    exit;
+    $kernel = new HttpKernel(
+        $healthController
+    );
+
+    $response = $kernel->handle(
+        Request::fromGlobals()
+    );
+} catch (ConfigurationException $exception) {
+    ExceptionLogger::log(
+        $exception,
+        'bootstrap.configuration'
+    );
+
+    $response = JsonResponse::error(
+        'service_unavailable',
+        'Serviço temporariamente indisponível.',
+        503
+    );
+} catch (Throwable $exception) {
+    ExceptionLogger::log(
+        $exception,
+        'http.unhandled'
+    );
+
+    $response = JsonResponse::error(
+        'internal_error',
+        'Ocorreu um erro interno.',
+        500
+    );
 }
 
-http_response_code(404);
-
-echo json_encode(
-    [
-        'success' => false,
-        'error' => [
-            'code' => 'route_not_found',
-            'message' => 'Rota não encontrada.',
-        ],
-    ],
-    JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-);
+$response->send();
