@@ -6,9 +6,13 @@ namespace AgendaInteligente\Infrastructure\Http;
 
 final class Request
 {
+    /**
+     * @param array<string, string> $routeParams
+     */
     private function __construct(
         private string $method,
-        private string $path
+        private string $path,
+        private array $routeParams = []
     ) {
     }
 
@@ -55,6 +59,33 @@ final class Request
     public function path(): string
     {
         return $this->path;
+    }
+
+    /**
+     * @param array<string, string> $routeParams
+     */
+    public function withRouteParams(
+        array $routeParams
+    ): self {
+        $request = clone $this;
+        $request->routeParams = $routeParams;
+
+        return $request;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function routeParams(): array
+    {
+        return $this->routeParams;
+    }
+
+    public function routeParam(
+        string $name
+    ): ?string {
+        return $this->routeParams[$name]
+            ?? null;
     }
 
     private static function normalizePath(

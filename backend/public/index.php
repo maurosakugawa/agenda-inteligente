@@ -8,6 +8,7 @@ use AgendaInteligente\Infrastructure\Config\ConfigurationException;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
 use AgendaInteligente\Infrastructure\Http\Request;
+use AgendaInteligente\Infrastructure\Http\Router;
 use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -56,8 +57,14 @@ try {
         }
     );
 
+    /** @var callable(HealthController): Router $routeFactory */
+    $routeFactory = require dirname(__DIR__)
+        . '/routes/http.php';
+
     $kernel = new HttpKernel(
-        $healthController
+        $routeFactory(
+            $healthController
+        )
     );
 
     $response = $kernel->handle(
