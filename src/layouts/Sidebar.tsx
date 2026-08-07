@@ -7,8 +7,6 @@ import {
   LayoutDashboard,
   Loader2,
   LogOut,
-  NotebookPen,
-  Settings,
   Users,
 } from "lucide-react";
 
@@ -42,19 +40,9 @@ const items = [
     path: "/contacts",
   },
   {
-    label: "Notas",
-    icon: NotebookPen,
-    path: "/notes",
-  },
-  {
     label: "Clima",
     icon: Cloud,
     path: "/weather",
-  },
-  {
-    label: "Configurações",
-    icon: Settings,
-    path: "/settings",
   },
 ];
 

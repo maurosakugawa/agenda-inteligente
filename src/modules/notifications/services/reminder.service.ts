@@ -22,6 +22,10 @@ export function shouldTriggerReminder(
     return false;
   }
 
+  if (event.reminder <= 0) {
+    return false;
+  }
+
   const eventDate = new Date(
     `${event.date}T${event.time}`
   );

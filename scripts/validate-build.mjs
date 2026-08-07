@@ -19,10 +19,48 @@ const indexPath =
     'index.html'
   );
 
+const htaccessPath =
+  join(
+    distPath,
+    '.htaccess'
+  );
+
 if (!existsSync(indexPath)) {
   throw new Error(
     'dist/index.html não foi gerado'
   );
+}
+
+if (!existsSync(htaccessPath)) {
+  throw new Error(
+    'dist/.htaccess não foi gerado'
+  );
+}
+
+const htaccessContent =
+  readFileSync(
+    htaccessPath,
+    'utf-8'
+  );
+
+const requiredHtaccessRules = [
+  '/api',
+  '/auth',
+  '/health',
+  'index.html',
+];
+
+for (
+  const rule
+  of requiredHtaccessRules
+) {
+  if (
+    !htaccessContent.includes(rule)
+  ) {
+    throw new Error(
+      `Regra obrigatória ausente em dist/.htaccess: ${rule}`
+    );
+  }
 }
 
 const textExtensions =
@@ -135,6 +173,9 @@ console.log(
 );
 console.log(
   '✅ Produção usa API na mesma origem'
+);
+console.log(
+  '✅ Fallback da SPA preserva rotas do backend'
 );
 console.log(
   '✅ Nenhuma chave OpenWeather no bundle'

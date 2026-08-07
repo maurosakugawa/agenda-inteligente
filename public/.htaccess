@@ -1,0 +1,14 @@
+RewriteEngine On
+
+# Rotas reservadas ao backend.
+# Elas nunca devem utilizar o fallback da SPA.
+RewriteCond %{REQUEST_URI} !^/api(/|$) [NC]
+RewriteCond %{REQUEST_URI} !^/auth(/|$) [NC]
+RewriteCond %{REQUEST_URI} !^/health/?$ [NC]
+
+# Arquivos e diretórios existentes são servidos normalmente.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Demais caminhos pertencem ao React Router.
+RewriteRule ^ index.html [L]
