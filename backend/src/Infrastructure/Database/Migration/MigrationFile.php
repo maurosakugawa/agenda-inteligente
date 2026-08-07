@@ -67,4 +67,39 @@ final class MigrationFile
     {
         return $this->sequence;
     }
+
+    public function checksum(): string
+    {
+        if (
+            !is_file(
+                $this->path
+            )
+            || !is_readable(
+                $this->path
+            )
+        ) {
+            throw new MigrationException(
+                sprintf(
+                    'Arquivo de migration não pode ser lido: %s.',
+                    $this->filename
+                )
+            );
+        }
+
+        $checksum = hash_file(
+            'sha256',
+            $this->path
+        );
+
+        if ($checksum === false) {
+            throw new MigrationException(
+                sprintf(
+                    'Não foi possível calcular o checksum da migration: %s.',
+                    $this->filename
+                )
+            );
+        }
+
+        return $checksum;
+    }
 }

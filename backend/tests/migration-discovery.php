@@ -83,6 +83,32 @@ function writeMigrationTestFile(
     }
 }
 
+function createMigrationTestDirectory(
+    string $prefix
+): string {
+    $directory =
+        sys_get_temp_dir()
+        . DIRECTORY_SEPARATOR
+        . $prefix
+        . bin2hex(
+            random_bytes(8)
+        );
+
+    if (
+        !mkdir(
+            $directory,
+            0700,
+            true
+        )
+    ) {
+        throw new RuntimeException(
+            'Não foi possível criar diretório temporário.'
+        );
+    }
+
+    return $directory;
+}
+
 function removeMigrationTestDirectory(
     string $directory
 ): void {
@@ -421,6 +447,157 @@ $tests[
                 );
             }
         }
+    }
+};
+
+$tests[
+    'calcula checksum SHA-256 do conteúdo exato'
+] = static function (): void {
+    $directory =
+        createMigrationTestDirectory(
+            'agenda-migration-checksum-tests-'
+        );
+
+    $file =
+        $directory
+        . DIRECTORY_SEPARATOR
+        . '001_checksum_test.sql';
+
+    $contents =
+        "CREATE TABLE example (\n"
+        . "    id INT NOT NULL\n"
+        . ");\n";
+
+    try {
+        $written = file_put_contents(
+            $file,
+            $contents
+        );
+
+        if ($written === false) {
+            throw new RuntimeException(
+                'Não foi possível criar migration para teste de checksum.'
+            );
+        }
+
+        $migration =
+            new MigrationFile(
+                $file
+            );
+
+        $checksum =
+            $migration->checksum();
+
+        assertMigrationSame(
+            hash(
+                'sha256',
+                $contents
+            ),
+            $checksum,
+            'O checksum SHA-256 não corresponde ao conteúdo exato.'
+        );
+
+        assertMigrationSame(
+            64,
+            strlen(
+                $checksum
+            ),
+            'O checksum SHA-256 deve possuir 64 caracteres.'
+        );
+
+        assertMigrationSame(
+            $checksum,
+            $migration->checksum(),
+            'O checksum deve permanecer estável sem alteração do arquivo.'
+        );
+    } finally {
+        removeMigrationTestDirectory(
+            $directory
+        );
+    }
+};
+
+$tests[
+    'checksum muda quando conteúdo da migration muda'
+] = static function (): void {
+    $directory =
+        createMigrationTestDirectory(
+            'agenda-migration-checksum-change-tests-'
+        );
+
+    $file =
+        $directory
+        . DIRECTORY_SEPARATOR
+        . '001_checksum_change.sql';
+
+    try {
+        $written = file_put_contents(
+            $file,
+            "SELECT 1;\n"
+        );
+
+        if ($written === false) {
+            throw new RuntimeException(
+                'Não foi possível criar migration para teste de checksum.'
+            );
+        }
+
+        $migration =
+            new MigrationFile(
+                $file
+            );
+
+        $originalChecksum =
+            $migration->checksum();
+
+        $written = file_put_contents(
+            $file,
+            "SELECT 1;\n\n"
+        );
+
+        if ($written === false) {
+            throw new RuntimeException(
+                'Não foi possível alterar migration para teste de checksum.'
+            );
+        }
+
+        assertMigrationTrue(
+            $originalChecksum
+                !== $migration->checksum(),
+            'O checksum deveria mudar após alteração do conteúdo exato.'
+        );
+    } finally {
+        removeMigrationTestDirectory(
+            $directory
+        );
+    }
+};
+
+$tests[
+    'rejeita checksum de arquivo inexistente'
+] = static function (): void {
+    $directory =
+        createMigrationTestDirectory(
+            'agenda-migration-missing-tests-'
+        );
+
+    try {
+        $migration =
+            new MigrationFile(
+                $directory
+                . DIRECTORY_SEPARATOR
+                . '001_missing.sql'
+            );
+
+        assertMigrationException(
+            static fn (): string =>
+                $migration->checksum(),
+            'Arquivo de migration não pode ser lido'
+        );
+    } finally {
+        removeMigrationTestDirectory(
+            $directory
+        );
     }
 };
 
