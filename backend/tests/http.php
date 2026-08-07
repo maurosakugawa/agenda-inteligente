@@ -179,6 +179,128 @@ $tests['usa valores padrão para requisição vazia'] = static function (): void
     );
 };
 
+$tests['normaliza e consulta headers sem diferenciar maiúsculas'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'X-CSRF-Token' => '  token-teste  ',
+            'Accept' => 'application/json',
+        ]
+    );
+
+    assertHttpSame(
+        'token-teste',
+        $request->header(
+            'X-CSRF-Token'
+        ),
+        'O header CSRF não foi retornado.'
+    );
+
+    assertHttpSame(
+        'token-teste',
+        $request->header(
+            'x-csrf-token'
+        ),
+        'A consulta de header não é case-insensitive.'
+    );
+
+    assertHttpSame(
+        'application/json',
+        $request->header(
+            'ACCEPT'
+        ),
+        'O header Accept não foi normalizado.'
+    );
+
+    assertHttpSame(
+        [
+            'x-csrf-token' => 'token-teste',
+            'accept' => 'application/json',
+        ],
+        $request->headers(),
+        'Os headers normalizados estão incorretos.'
+    );
+
+    assertHttpSame(
+        null,
+        $request->header(
+            'X-Inexistente'
+        ),
+        'Um header inexistente retornou valor.'
+    );
+
+    assertHttpSame(
+        null,
+        $request->header(''),
+        'Um nome de header vazio foi aceito.'
+    );
+};
+
+$tests['captura headers a partir dos globals'] = static function (): void {
+    $originalServer = $_SERVER;
+
+    try {
+        $_SERVER = [
+            'REQUEST_METHOD' => 'post',
+            'REQUEST_URI' => '/api/teste?origem=globals',
+            'HTTP_X_CSRF_TOKEN' => 'csrf-global',
+            'HTTP_ACCEPT' => 'application/json',
+            'CONTENT_TYPE' => 'application/json; charset=utf-8',
+            'CONTENT_LENGTH' => '42',
+        ];
+
+        $request =
+            Request::fromGlobals();
+
+        assertHttpSame(
+            'POST',
+            $request->method(),
+            'O método vindo dos globals está incorreto.'
+        );
+
+        assertHttpSame(
+            '/api/teste',
+            $request->path(),
+            'O caminho vindo dos globals está incorreto.'
+        );
+
+        assertHttpSame(
+            'csrf-global',
+            $request->header(
+                'X-CSRF-Token'
+            ),
+            'HTTP_X_CSRF_TOKEN não foi convertido corretamente.'
+        );
+
+        assertHttpSame(
+            'application/json',
+            $request->header(
+                'Accept'
+            ),
+            'HTTP_ACCEPT não foi convertido corretamente.'
+        );
+
+        assertHttpSame(
+            'application/json; charset=utf-8',
+            $request->header(
+                'Content-Type'
+            ),
+            'CONTENT_TYPE não foi convertido corretamente.'
+        );
+
+        assertHttpSame(
+            '42',
+            $request->header(
+                'Content-Length'
+            ),
+            'CONTENT_LENGTH não foi convertido corretamente.'
+        );
+    } finally {
+        $_SERVER = $originalServer;
+    }
+};
+
 $tests['cria resposta JSON de sucesso'] = static function (): void {
     $response = JsonResponse::success(
         [

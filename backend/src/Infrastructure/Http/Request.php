@@ -7,11 +7,13 @@ namespace AgendaInteligente\Infrastructure\Http;
 final class Request
 {
     /**
+     * @param array<string, string> $headers
      * @param array<string, string> $routeParams
      */
     private function __construct(
         private string $method,
         private string $path,
+        private array $headers = [],
         private array $routeParams = []
     ) {
     }
@@ -20,13 +22,20 @@ final class Request
     {
         return self::create(
             (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'),
-            (string) ($_SERVER['REQUEST_URI'] ?? '/')
+            (string) ($_SERVER['REQUEST_URI'] ?? '/'),
+            self::headersFromServer(
+                $_SERVER
+            )
         );
     }
 
+    /**
+     * @param array<string, string> $headers
+     */
     public static function create(
         string $method,
-        string $uri
+        string $uri,
+        array $headers = []
     ): self {
         $normalizedMethod = strtoupper(
             trim($method)
@@ -47,7 +56,8 @@ final class Request
 
         return new self(
             $normalizedMethod,
-            self::normalizePath($path)
+            self::normalizePath($path),
+            self::normalizeHeaders($headers)
         );
     }
 
@@ -59,6 +69,31 @@ final class Request
     public function path(): string
     {
         return $this->path;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function headers(): array
+    {
+        return $this->headers;
+    }
+
+    public function header(
+        string $name
+    ): ?string {
+        $normalizedName =
+            self::normalizeHeaderName(
+                $name
+            );
+
+        if ($normalizedName === '') {
+            return null;
+        }
+
+        return $this->headers[
+            $normalizedName
+        ] ?? null;
     }
 
     /**
@@ -115,5 +150,104 @@ final class Request
         return $path === ''
             ? '/'
             : $path;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     *
+     * @return array<string, string>
+     */
+    private static function normalizeHeaders(
+        array $headers
+    ): array {
+        $normalized = [];
+
+        foreach (
+            $headers as $name => $value
+        ) {
+            $normalizedName =
+                self::normalizeHeaderName(
+                    $name
+                );
+
+            if ($normalizedName === '') {
+                continue;
+            }
+
+            $normalized[
+                $normalizedName
+            ] = trim($value);
+        }
+
+        return $normalized;
+    }
+
+    private static function normalizeHeaderName(
+        string $name
+    ): string {
+        return strtolower(
+            trim($name)
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $server
+     *
+     * @return array<string, string>
+     */
+    private static function headersFromServer(
+        array $server
+    ): array {
+        $headers = [];
+
+        foreach (
+            $server as $name => $value
+        ) {
+            if (!is_string($value)) {
+                continue;
+            }
+
+            if (
+                str_starts_with(
+                    $name,
+                    'HTTP_'
+                )
+            ) {
+                $headerName =
+                    substr(
+                        $name,
+                        5
+                    );
+
+                if ($headerName === '') {
+                    continue;
+                }
+
+                $headers[
+                    str_replace(
+                        '_',
+                        '-',
+                        $headerName
+                    )
+                ] = $value;
+
+                continue;
+            }
+
+            if (
+                $name === 'CONTENT_TYPE'
+                || $name === 'CONTENT_LENGTH'
+            ) {
+                $headers[
+                    str_replace(
+                        '_',
+                        '-',
+                        $name
+                    )
+                ] = $value;
+            }
+        }
+
+        return $headers;
     }
 }
