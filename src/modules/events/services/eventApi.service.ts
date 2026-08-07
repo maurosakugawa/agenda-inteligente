@@ -186,13 +186,13 @@ function toDomainEvent(apiEvent: ApiEvent): Event {
 function toApiPayload(event: Event): ApiEventPayload {
   const priority =
     EVENT_PRIORITIES.includes(event.priority)
-      ? event.priority
-      : "Média";
+      ? normalizeKey(event.priority)
+      : "media";
 
   const category =
     EVENT_CATEGORIES.includes(event.category)
-      ? event.category
-      : "Geral";
+      ? normalizeKey(event.category)
+      : "geral";
 
   return {
     title: event.title.trim(),
