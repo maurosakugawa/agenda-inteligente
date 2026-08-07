@@ -68,7 +68,13 @@ final class MigrationFile
         return $this->sequence;
     }
 
-    public function checksum(): string
+    /**
+     * @return array{
+     *     sql: string,
+     *     checksum: string
+     * }
+     */
+    public function read(): array
     {
         if (
             !is_file(
@@ -86,20 +92,30 @@ final class MigrationFile
             );
         }
 
-        $checksum = hash_file(
-            'sha256',
+        $sql = file_get_contents(
             $this->path
         );
 
-        if ($checksum === false) {
+        if ($sql === false) {
             throw new MigrationException(
                 sprintf(
-                    'Não foi possível calcular o checksum da migration: %s.',
+                    'Arquivo de migration não pode ser lido: %s.',
                     $this->filename
                 )
             );
         }
 
-        return $checksum;
+        return [
+            'sql' => $sql,
+            'checksum' => hash(
+                'sha256',
+                $sql
+            ),
+        ];
+    }
+
+    public function checksum(): string
+    {
+        return $this->read()['checksum'];
     }
 }

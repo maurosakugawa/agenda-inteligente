@@ -451,6 +451,102 @@ $tests[
 };
 
 $tests[
+    'lê conteúdo exato e checksum dos mesmos bytes'
+] = static function (): void {
+    $directory =
+        createMigrationTestDirectory(
+            'agenda-migration-read-tests-'
+        );
+
+    $file =
+        $directory
+        . DIRECTORY_SEPARATOR
+        . '001_read_test.sql';
+
+    $contents =
+        "CREATE TABLE read_test (\n"
+        . "    id INT NOT NULL\n"
+        . ");\n";
+
+    try {
+        $written = file_put_contents(
+            $file,
+            $contents
+        );
+
+        if ($written === false) {
+            throw new RuntimeException(
+                'Não foi possível criar migration para teste de leitura.'
+            );
+        }
+
+        $migration =
+            new MigrationFile(
+                $file
+            );
+
+        $read =
+            $migration->read();
+
+        assertMigrationSame(
+            $contents,
+            $read['sql'],
+            'A leitura deve preservar exatamente os bytes da migration.'
+        );
+
+        assertMigrationSame(
+            hash(
+                'sha256',
+                $contents
+            ),
+            $read['checksum'],
+            'O checksum deve corresponder exatamente ao SQL retornado.'
+        );
+
+        assertMigrationSame(
+            hash(
+                'sha256',
+                $read['sql']
+            ),
+            $read['checksum'],
+            'SQL e checksum retornados devem pertencer à mesma leitura.'
+        );
+    } finally {
+        removeMigrationTestDirectory(
+            $directory
+        );
+    }
+};
+
+$tests[
+    'rejeita leitura de arquivo inexistente'
+] = static function (): void {
+    $directory =
+        createMigrationTestDirectory(
+            'agenda-migration-read-missing-tests-'
+        );
+
+    try {
+        $migration =
+            new MigrationFile(
+                $directory
+                . DIRECTORY_SEPARATOR
+                . '001_missing_read.sql'
+            );
+
+        assertMigrationException(
+            static fn (): array =>
+                $migration->read(),
+            'Arquivo de migration não pode ser lido'
+        );
+    } finally {
+        removeMigrationTestDirectory(
+            $directory
+        );
+    }
+};
+
+$tests[
     'calcula checksum SHA-256 do conteúdo exato'
 ] = static function (): void {
     $directory =
