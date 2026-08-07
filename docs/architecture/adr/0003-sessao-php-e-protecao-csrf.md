@@ -442,7 +442,10 @@ A resposta não deverá diferenciar:
 
 - usuário inexistente;
 - senha incorreta;
-- usuário desativado, quando essa distinção facilitar enumeração.
+- usuário desabilitado (`active = 0`);
+- usuário excluído logicamente (`deleted_at IS NOT NULL`).
+
+Essas condições deverão utilizar uma resposta genérica de credenciais inválidas, evitando enumeração de usuários e exposição do estado da conta.
 
 ## Registro
 
@@ -587,6 +590,17 @@ com status:
 ```
 
 `GET /auth/me` não deverá criar implicitamente uma sessão autenticada.
+
+Uma sessão autenticada somente permanecerá válida enquanto o usuário correspondente existir e estiver disponível.
+
+O usuário será considerado indisponível quando:
+
+- estiver com `active = 0`;
+- estiver com `deleted_at IS NOT NULL`.
+
+Caso a sessão aponte para um usuário inexistente ou indisponível, `/auth/me` deverá invalidar a sessão atual e retornar `401 Unauthorized`.
+
+A definição do ciclo de vida do usuário e da política de exclusão lógica permanece centralizada no ADR 0004.
 
 ## Tempo de expiração
 

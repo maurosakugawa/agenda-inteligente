@@ -246,8 +246,10 @@ CREATE TABLE users (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(100) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
+    deleted_at DATETIME NULL,
     UNIQUE KEY uq_users_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
@@ -255,6 +257,28 @@ CREATE TABLE users (
 A coluna `password_hash` armazenará o resultado de `password_hash`.
 
 A senha original não será armazenada.
+
+### Ciclo de vida do usuário
+
+Usuários utilizarão exclusão lógica desde a primeira implementação.
+
+A coluna `active` representa a disponibilidade da conta:
+
+- `active = 1`: conta habilitada;
+- `active = 0`: conta existente, porém desabilitada.
+
+A coluna `deleted_at` representa exclusão lógica:
+
+- `deleted_at IS NULL`: usuário não excluído;
+- `deleted_at IS NOT NULL`: usuário excluído logicamente.
+
+Usuários desabilitados ou excluídos logicamente não poderão autenticar.
+
+Uma sessão autenticada deverá ser considerada inválida caso o usuário correspondente esteja com `active = 0` ou `deleted_at IS NOT NULL`.
+
+O `username` permanecerá único mesmo após a exclusão lógica. Portanto, nomes de usuário excluídos não serão reutilizados automaticamente.
+
+As operações normais da aplicação não deverão executar exclusão física de usuários.
 
 ## Tabela `contacts`
 
@@ -282,7 +306,7 @@ CREATE TABLE contacts (
     CONSTRAINT fk_contacts_user
         FOREIGN KEY (user_id)
         REFERENCES users (id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     KEY idx_contacts_user_name (user_id, name),
     KEY idx_contacts_user_email (user_id, email),
@@ -347,7 +371,7 @@ CREATE TABLE events (
     CONSTRAINT fk_events_user
         FOREIGN KEY (user_id)
         REFERENCES users (id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     KEY idx_events_user_date_time (
         user_id,
@@ -547,11 +571,27 @@ Os eventos relacionados não serão excluídos.
 
 Antes da exclusão, a API poderá informar quantos eventos estão relacionados, caso isso faça parte da experiência definida no frontend.
 
-## Exclusão lógica
+## Política de exclusão
 
-A primeira implementação poderá utilizar exclusão física, preservando o contrato atual.
+A política de exclusão depende da entidade.
 
-Exclusão lógica somente será adicionada se houver requisito claro de:
+### Usuários
+
+Usuários utilizarão exclusão lógica desde a primeira implementação.
+
+A exclusão será representada por `users.deleted_at`.
+
+A desativação temporária ou administrativa será representada separadamente por `users.active`.
+
+Contatos, eventos e demais dados pertencentes ao usuário não deverão ser apagados em consequência da exclusão lógica ou desativação da conta.
+
+As chaves estrangeiras de `contacts` e `events` para `users` deverão impedir exclusão física enquanto existirem registros dependentes.
+
+### Contatos e eventos
+
+A primeira implementação poderá continuar utilizando exclusão física para contatos e eventos, preservando o contrato atual.
+
+Exclusão lógica para contatos ou eventos somente será adicionada se houver requisito claro de:
 
 - recuperação;
 - auditoria;
@@ -559,7 +599,7 @@ Exclusão lógica somente será adicionada se houver requisito claro de:
 - sincronização com tombstones;
 - retenção.
 
-Não serão adicionadas colunas `deleted_at` sem definição do comportamento da API e da sincronização.
+Não serão adicionadas colunas `deleted_at` a contatos ou eventos sem definição do comportamento da API e da sincronização.
 
 ## Ordenação dos contatos de um evento
 
@@ -1015,7 +1055,7 @@ No estado atual, ela contém decisões incompatíveis com o contrato preservado:
 - `starts_at`, `ends_at` e `all_day`;
 - `event_participants` em vez de `event_contacts`;
 - `response_status`;
-- exclusão lógica por `deleted_at`;
+- exclusão lógica genérica por `deleted_at` em entidades cujo contrato ainda não define essa política;
 - estados de evento ainda não definidos.
 
 Esses elementos não deverão chegar à produção sem ADR e adaptação explícita do contrato.
