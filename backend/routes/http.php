@@ -2,13 +2,17 @@
 
 declare(strict_types=1);
 
+use AgendaInteligente\Application\Auth\CsrfController;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\Router;
 
 return static function (
-    HealthController $healthController
+    HealthController $healthController,
+    CsrfController $csrfController,
+    SessionMiddleware $sessionMiddleware
 ): Router {
     $router = new Router();
 
@@ -24,9 +28,24 @@ return static function (
         '/health',
         $healthHandler
     );
+
     $router->get(
         '/api/health',
         $healthHandler
+    );
+
+    $router->get(
+        '/auth/csrf',
+        static function (
+            Request $request
+        ) use (
+            $csrfController
+        ): JsonResponse {
+            return $csrfController->handle();
+        },
+        [
+            $sessionMiddleware,
+        ]
     );
 
     return $router;

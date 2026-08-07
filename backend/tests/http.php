@@ -2,13 +2,17 @@
 
 declare(strict_types=1);
 
+use AgendaInteligente\Application\Auth\CsrfController;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Application\HttpKernel;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\MiddlewareInterface;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\RequestHandlerInterface;
 use AgendaInteligente\Infrastructure\Http\Router;
+use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
+use AgendaInteligente\Infrastructure\Session\SessionManager;
 
 require_once dirname(__DIR__) . '/autoload.php';
 
@@ -75,6 +79,50 @@ function assertHttpSame(
             )
         );
     }
+}
+
+function resetHttpNativeSession(): void
+{
+    if (
+        session_status()
+        === PHP_SESSION_ACTIVE
+    ) {
+        $_SESSION = [];
+        session_destroy();
+    }
+
+    if (
+        session_status()
+        === PHP_SESSION_NONE
+    ) {
+        session_id('');
+    }
+
+    $_SESSION = [];
+}
+
+function removeHttpSessionDirectory(
+    string $sessionPath
+): void {
+    if (!is_dir($sessionPath)) {
+        return;
+    }
+
+    $sessionFiles = glob(
+        $sessionPath . '/*'
+    );
+
+    if (is_array($sessionFiles)) {
+        foreach ($sessionFiles as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+    }
+
+    rmdir(
+        $sessionPath
+    );
 }
 
 $temporaryLog = sys_get_temp_dir()
@@ -612,38 +660,290 @@ $tests['kernel delega para o roteador'] = static function (): void {
 };
 
 $tests['registra as duas rotas de health'] = static function (): void {
+    resetHttpNativeSession();
+
     $healthController = new HealthController(
         static function (): void {
         }
     );
 
-    /** @var callable(HealthController): Router $routeFactory */
-    $routeFactory = require dirname(__DIR__)
-        . '/routes/http.php';
-    $router = $routeFactory(
-        $healthController
-    );
+    $sessionPath = sys_get_temp_dir()
+        . '/agenda-http-route-session-'
+        . bin2hex(random_bytes(8));
 
-    foreach (
-        [
-            '/health',
-            '/api/health',
-        ] as $path
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
     ) {
+        throw new RuntimeException(
+            'Não foi possível criar o diretório temporário de sessões.'
+        );
+    }
+
+    try {
+        $sessionManager = new SessionManager(
+            [
+                'name' => 'AGENDA_HTTP_ROUTE_TEST',
+                'secure' => false,
+                'same_site' => 'Lax',
+                'idle_timeout' => 1800,
+                'absolute_timeout' => 28800,
+            ],
+            $sessionPath
+        );
+
+        $csrfController = new CsrfController(
+            new CsrfTokenManager(
+                $sessionManager
+            )
+        );
+
+        $sessionMiddleware = new SessionMiddleware(
+            $sessionManager
+        );
+
+        /**
+         * @var callable(
+         *     HealthController,
+         *     CsrfController,
+         *     SessionMiddleware
+         * ): Router $routeFactory
+         */
+        $routeFactory = require dirname(__DIR__)
+            . '/routes/http.php';
+
+        $router = $routeFactory(
+            $healthController,
+            $csrfController,
+            $sessionMiddleware
+        );
+
+        foreach (
+            [
+                '/health',
+                '/api/health',
+            ] as $path
+        ) {
+            $response = $router->handle(
+                Request::create(
+                    'GET',
+                    $path
+                )
+            );
+
+            assertHttpSame(
+                200,
+                $response->statusCode(),
+                sprintf(
+                    'A rota %s não retornou 200.',
+                    $path
+                )
+            );
+
+            assertHttpSame(
+                PHP_SESSION_NONE,
+                session_status(),
+                sprintf(
+                    'A rota %s iniciou sessão indevidamente.',
+                    $path
+                )
+            );
+        }
+    } finally {
+        resetHttpNativeSession();
+
+        removeHttpSessionDirectory(
+            $sessionPath
+        );
+    }
+};
+
+$tests['rota csrf cria sessão anônima e persiste token'] = static function (): void {
+    resetHttpNativeSession();
+
+    $sessionPath = sys_get_temp_dir()
+        . '/agenda-http-csrf-session-'
+        . bin2hex(random_bytes(8));
+
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
+    ) {
+        throw new RuntimeException(
+            'Não foi possível criar o diretório temporário de sessões.'
+        );
+    }
+
+    try {
+        $sessionManager = new SessionManager(
+            [
+                'name' => 'AGENDA_HTTP_CSRF_TEST',
+                'secure' => false,
+                'same_site' => 'Lax',
+                'idle_timeout' => 1800,
+                'absolute_timeout' => 28800,
+            ],
+            $sessionPath
+        );
+
+        $csrfTokenManager = new CsrfTokenManager(
+            $sessionManager
+        );
+
+        $csrfController = new CsrfController(
+            $csrfTokenManager
+        );
+
+        $sessionMiddleware = new SessionMiddleware(
+            $sessionManager
+        );
+
+        $healthController = new HealthController(
+            static function (): void {
+            }
+        );
+
+        /**
+         * @var callable(
+         *     HealthController,
+         *     CsrfController,
+         *     SessionMiddleware
+         * ): Router $routeFactory
+         */
+        $routeFactory = require dirname(__DIR__)
+            . '/routes/http.php';
+
+        $router = $routeFactory(
+            $healthController,
+            $csrfController,
+            $sessionMiddleware
+        );
+
+        assertHttpSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'Uma sessão já estava ativa antes da requisição CSRF.'
+        );
+
         $response = $router->handle(
             Request::create(
                 'GET',
-                $path
+                '/auth/csrf'
             )
         );
 
         assertHttpSame(
             200,
             $response->statusCode(),
-            sprintf(
-                'A rota %s não retornou 200.',
-                $path
+            'A rota CSRF não retornou 200.'
+        );
+
+        assertHttpSame(
+            'no-store',
+            $response->headers()['Cache-Control'] ?? null,
+            'A rota CSRF não desabilitou cache.'
+        );
+
+        $token = $response->payload()['csrf_token']
+            ?? null;
+
+        assertHttpTrue(
+            is_string($token),
+            'A rota CSRF não retornou um token.'
+        );
+
+        assertHttpSame(
+            64,
+            strlen($token),
+            'O token CSRF não possui 64 caracteres.'
+        );
+
+        assertHttpTrue(
+            ctype_xdigit($token),
+            'O token CSRF não está em formato hexadecimal.'
+        );
+
+        assertHttpSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'A sessão permaneceu aberta após a requisição.'
+        );
+
+        $sessionId = session_id();
+
+        assertHttpTrue(
+            $sessionId !== '',
+            'Nenhum identificador de sessão foi criado.'
+        );
+
+        $sessionManager->start();
+
+        $security = $sessionManager->get(
+            'security'
+        );
+
+        assertHttpTrue(
+            is_array($security),
+            'O estado de segurança da sessão não está disponível.'
+        );
+
+        assertHttpSame(
+            $token,
+            $security['csrf_token'] ?? null,
+            'O token retornado não foi persistido na sessão.'
+        );
+
+        assertHttpSame(
+            null,
+            $sessionManager->get(
+                'auth'
+            ),
+            'A sessão CSRF anônima contém dados de autenticação.'
+        );
+
+        $sessionManager->close();
+
+        $secondResponse = $router->handle(
+            Request::create(
+                'GET',
+                '/auth/csrf'
             )
+        );
+
+        assertHttpSame(
+            200,
+            $secondResponse->statusCode(),
+            'A segunda requisição CSRF não retornou 200.'
+        );
+
+        assertHttpSame(
+            $token,
+            $secondResponse->payload()['csrf_token'] ?? null,
+            'Uma segunda requisição da mesma sessão trocou o token CSRF.'
+        );
+
+        assertHttpSame(
+            $sessionId,
+            session_id(),
+            'A segunda requisição alterou a sessão sem necessidade.'
+        );
+
+        assertHttpSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'A sessão permaneceu aberta após a segunda requisição.'
+        );
+    } finally {
+        resetHttpNativeSession();
+
+        removeHttpSessionDirectory(
+            $sessionPath
         );
     }
 };

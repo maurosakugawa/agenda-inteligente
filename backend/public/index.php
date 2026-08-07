@@ -2,14 +2,18 @@
 
 declare(strict_types=1);
 
+use AgendaInteligente\Application\Auth\CsrfController;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Application\HttpKernel;
 use AgendaInteligente\Infrastructure\Config\ConfigurationException;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\Router;
 use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
+use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
+use AgendaInteligente\Infrastructure\Session\SessionManager;
 
 require_once dirname(__DIR__) . '/autoload.php';
 
@@ -37,6 +41,35 @@ try {
 
     $databaseConfig = $application['database'];
 
+    $config = $application['config'];
+
+    /**
+     * @var array{
+     *     name:string,
+     *     secure:bool,
+     *     same_site:string,
+     *     idle_timeout:int,
+     *     absolute_timeout:int
+     * } $sessionConfig
+     */
+    $sessionConfig = $config['session'];
+
+    $sessionManager = new SessionManager(
+        $sessionConfig
+    );
+
+    $csrfTokenManager = new CsrfTokenManager(
+        $sessionManager
+    );
+
+    $csrfController = new CsrfController(
+        $csrfTokenManager
+    );
+
+    $sessionMiddleware = new SessionMiddleware(
+        $sessionManager
+    );
+
     $healthController = new HealthController(
         static function () use (
             $databaseConfig
@@ -57,13 +90,22 @@ try {
         }
     );
 
-    /** @var callable(HealthController): Router $routeFactory */
+    /**
+     * @var callable(
+     *     HealthController,
+     *     CsrfController,
+     *     SessionMiddleware
+     * ): Router $routeFactory
+     */
+
     $routeFactory = require dirname(__DIR__)
         . '/routes/http.php';
 
     $kernel = new HttpKernel(
         $routeFactory(
-            $healthController
+            $healthController,
+            $csrfController,
+            $sessionMiddleware
         )
     );
 
