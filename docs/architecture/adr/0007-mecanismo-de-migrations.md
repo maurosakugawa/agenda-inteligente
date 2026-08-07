@@ -119,7 +119,22 @@ Os nomes deverão ser:
 - descritivos;
 - preservados após aplicação.
 
-Não serão reutilizados números de migrations anteriores.
+A numeração sequencial começará em `001`.
+
+O prefixo `000` é inválido e não poderá ser utilizado por uma migration.
+
+Cada prefixo sequencial `NNN` será exclusivo dentro do histórico de migrations.
+
+Duas migrations não poderão compartilhar o mesmo prefixo numérico, ainda que possuam descrições diferentes.
+
+Exemplo inválido:
+
+```text
+020_first_change.sql
+020_second_change.sql
+```
+
+Uma vez utilizado, um número de migration não poderá ser reutilizado, independentemente de a migration já ter sido aplicada ou de seu arquivo permanecer apenas no histórico do projeto.
 
 ## Ordem de execução
 
