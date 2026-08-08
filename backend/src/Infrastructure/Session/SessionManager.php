@@ -92,6 +92,15 @@ final class SessionManager
         }
     }
 
+    public function renewLifetime(): void
+    {
+        $this->requireStarted();
+
+        $this->initializeSecurity(
+            ($this->clock)()
+        );
+    }
+
     public function get(
         string $key,
         mixed $default = null

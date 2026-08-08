@@ -1062,12 +1062,22 @@ $tests['registra as duas rotas de health'] = static function (): void {
             201
         );
 
+        $loginHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_in' => true,
+            ],
+            200
+        );
+
         /**
          * @var callable(
          *     HealthController,
          *     CsrfController,
          *     SessionMiddleware,
          *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse
          * ): Router $routeFactory
          */
@@ -1079,7 +1089,8 @@ $tests['registra as duas rotas de health'] = static function (): void {
             $csrfController,
             $sessionMiddleware,
             $csrfMiddleware,
-            $registerHandler
+            $registerHandler,
+            $loginHandler
         );
 
         foreach (
@@ -1178,6 +1189,15 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
             201
         );
 
+        $loginHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_in' => true,
+            ],
+            200
+        );
+
         $healthController = new HealthController(
             static function (): void {
             }
@@ -1189,6 +1209,7 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
          *     CsrfController,
          *     SessionMiddleware,
          *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse
          * ): Router $routeFactory
          */
@@ -1200,7 +1221,8 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
             $csrfController,
             $sessionMiddleware,
             $csrfMiddleware,
-            $registerHandler
+            $registerHandler,
+            $loginHandler
         );
 
         assertHttpSame(

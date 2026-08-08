@@ -327,6 +327,84 @@ $tests[
 };
 
 $tests[
+    'renova tempos de segurança da sessão'
+] = static function () use (
+    $temporarySessionPath
+): void {
+    $now = 2_500_000;
+
+    $manager = new SessionManager(
+        sessionTestConfig(),
+        $temporarySessionPath,
+        static function () use (
+            &$now
+        ): int {
+            return $now;
+        }
+    );
+
+    $manager->start();
+
+    $securityBefore =
+        $manager->get(
+            'security'
+        );
+
+    assertSessionSame(
+        2_500_000,
+        $securityBefore['created_at']
+            ?? null,
+        'created_at inicial está incorreto.'
+    );
+
+    assertSessionSame(
+        2_500_000,
+        $securityBefore['last_activity_at']
+            ?? null,
+        'last_activity_at inicial está incorreto.'
+    );
+
+    assertSessionSame(
+        2_528_800,
+        $securityBefore['absolute_expires_at']
+            ?? null,
+        'absolute_expires_at inicial está incorreto.'
+    );
+
+    $now = 2_500_123;
+
+    $manager->renewLifetime();
+
+    $securityAfter =
+        $manager->get(
+            'security'
+        );
+
+    assertSessionSame(
+        2_500_123,
+        $securityAfter['created_at']
+            ?? null,
+        'created_at não foi renovado.'
+    );
+
+    assertSessionSame(
+        2_500_123,
+        $securityAfter['last_activity_at']
+            ?? null,
+        'last_activity_at não foi renovado.'
+    );
+
+    assertSessionSame(
+        2_528_923,
+        $securityAfter['absolute_expires_at']
+            ?? null,
+        'absolute_expires_at não foi renovado.'
+    );
+
+    $manager->destroy();
+};
+
+$tests[
     'atualiza atividade ao reabrir sessão válida'
 ] = static function () use (
     $temporarySessionPath

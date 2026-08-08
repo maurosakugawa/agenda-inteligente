@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use AgendaInteligente\Application\Auth\CredentialValidator;
+use AgendaInteligente\Application\Auth\CredentialVerifier;
 use AgendaInteligente\Application\Auth\CsrfController;
+use AgendaInteligente\Application\Auth\LoginController;
 use AgendaInteligente\Application\Auth\RegisterController;
 use AgendaInteligente\Application\Auth\UserRegistrar;
 use AgendaInteligente\Application\Health\HealthController;
@@ -19,6 +21,7 @@ use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
 use AgendaInteligente\Infrastructure\Security\PasswordHasher;
+use AgendaInteligente\Infrastructure\Session\AuthenticatedSession;
 use AgendaInteligente\Infrastructure\Session\SessionManager;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -80,6 +83,11 @@ try {
         $csrfTokenManager
     );
 
+    $authenticatedSession = new AuthenticatedSession(
+        $sessionManager,
+        $csrfTokenManager
+    );
+
     $healthController = new HealthController(
         static function () use (
             $databaseConfig
@@ -138,11 +146,51 @@ try {
     };
 
     /**
+     * @var callable(Request): JsonResponse $loginHandler
+     */
+    $loginHandler = static function (
+        Request $request
+    ) use (
+        $databaseConfig,
+        $authenticatedSession
+    ): JsonResponse {
+        static $loginController = null;
+
+        if (
+            !$loginController instanceof LoginController
+        ) {
+            $pdo = Connection::make(
+                $databaseConfig
+            );
+
+            $repository = new UserRepository(
+                $pdo
+            );
+
+            $verifier = new CredentialVerifier(
+                $repository,
+                new PasswordHasher(),
+                new CredentialValidator()
+            );
+
+            $loginController = new LoginController(
+                $verifier,
+                $authenticatedSession
+            );
+        }
+
+        return $loginController->handle(
+            $request
+        );
+    };
+
+    /**
      * @var callable(
      *     HealthController,
      *     CsrfController,
      *     SessionMiddleware,
      *     CsrfMiddleware,
+     *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse
      * ): Router $routeFactory
      */
@@ -155,7 +203,8 @@ try {
             $csrfController,
             $sessionMiddleware,
             $csrfMiddleware,
-            $registerHandler
+            $registerHandler,
+            $loginHandler
         )
     );
 
