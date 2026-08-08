@@ -5,6 +5,7 @@ declare(strict_types=1);
 use AgendaInteligente\Infrastructure\Config\ConfigLoader;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Database\Migration\MigrationException;
+use AgendaInteligente\Infrastructure\Database\Migration\MigrationLock;
 use AgendaInteligente\Infrastructure\Database\Migration\MigrationRunner;
 use AgendaInteligente\Infrastructure\Database\Migration\SchemaMigrationStore;
 
@@ -110,6 +111,74 @@ if (
     exit(1);
 }
 
+/**
+ * @param array{
+ *     host:string,
+ *     port:int,
+ *     database:string,
+ *     username:string,
+ *     password:string,
+ *     charset:string
+ * } $databaseConfig
+ */
+function makeIndependentRunnerConnection(
+    array $databaseConfig
+): PDO {
+    $dsn =
+        sprintf(
+            'mysql:host=%s;port=%d;dbname=%s;charset=%s',
+            $databaseConfig['host'],
+            $databaseConfig['port'],
+            $databaseConfig['database'],
+            $databaseConfig['charset']
+        );
+
+    return new PDO(
+        $dsn,
+        $databaseConfig['username'],
+        $databaseConfig['password'],
+        [
+            PDO::ATTR_ERRMODE
+                => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE
+                => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES
+                => false,
+            PDO::ATTR_STRINGIFY_FETCHES
+                => false,
+        ]
+    );
+}
+
+function runnerMigrationLockName(
+    PDO $pdo
+): string {
+    $database =
+        $pdo->query(
+            'SELECT DATABASE()'
+        )->fetchColumn();
+
+    if (
+        !is_string($database)
+        || $database === ''
+    ) {
+        throw new RuntimeException(
+            'Não foi possível identificar banco para teste do lock.'
+        );
+    }
+
+    return
+        'agenda-inteligente:migrations:'
+        . substr(
+            hash(
+                'sha256',
+                $database
+            ),
+            0,
+            32
+        );
+}
+
 function createRunnerMigrationDirectory(): string
 {
     $directory =
@@ -204,6 +273,9 @@ function resetRunnerDatabase(
     $pdo->exec(
         "
         DROP TABLE IF EXISTS
+            runner_double_failure,
+            runner_lock_success,
+            runner_lock_blocked,
             runner_partial_created,
             runner_after_failure,
             runner_before_failure,
@@ -305,6 +377,375 @@ function runRunnerTest(
 }
 
 $tests = [];
+
+$tests[
+    'preserva falha da migration quando liberação do lock também falha'
+] = static function () use ($pdo): void {
+    resetRunnerDatabase(
+        $pdo
+    );
+
+    $directory =
+        createRunnerMigrationDirectory();
+
+    $lockName =
+        runnerMigrationLockName(
+            $pdo
+        );
+
+    $quotedLockName =
+        $pdo->quote(
+            $lockName
+        );
+
+    $sql =
+        sprintf(
+            "DO RELEASE_LOCK(%s);\n"
+            . "CREATE TABL runner_double_failure (\n"
+            . "    id INT NOT NULL\n"
+            . ");\n",
+            $quotedLockName
+        );
+
+    try {
+        writeRunnerMigration(
+            $directory,
+            '001_double_failure.sql',
+            $sql
+        );
+
+        $runner =
+            new MigrationRunner(
+                $pdo,
+                $directory,
+                0
+            );
+
+        $failure = null;
+
+        try {
+            $runner->run();
+        } catch (MigrationException $exception) {
+            $failure = $exception;
+        }
+
+        assertRunnerTrue(
+            $failure instanceof MigrationException,
+            'Runner deveria reportar a falha dupla.'
+        );
+
+        assertRunnerTrue(
+            str_contains(
+                $failure->getMessage(),
+                'também ao liberar lock'
+            ),
+            'Erro final deveria informar também a falha de liberação.'
+        );
+
+        $migrationFailure =
+            $failure->getPrevious();
+
+        assertRunnerTrue(
+            $migrationFailure
+                instanceof MigrationException,
+            'Falha original da migration deveria ser preservada.'
+        );
+
+        assertRunnerTrue(
+            str_contains(
+                $migrationFailure->getMessage(),
+                '001_double_failure'
+            ),
+            'Falha preservada deveria identificar a migration original.'
+        );
+
+        assertRunnerTrue(
+            $migrationFailure->getPrevious()
+                instanceof PDOException,
+            'PDOException original deveria permanecer na cadeia.'
+        );
+
+        assertRunnerTrue(
+            !runnerTableExists(
+                $pdo,
+                'runner_double_failure'
+            ),
+            'Tabela inválida não deveria existir.'
+        );
+    } finally {
+        resetRunnerDatabase(
+            $pdo
+        );
+
+        removeRunnerMigrationDirectory(
+            $directory
+        );
+    }
+};
+
+$tests[
+    'não inicia migrations quando lock está ocupado'
+] = static function () use (
+    $pdo,
+    $databaseConfig
+): void {
+    resetRunnerDatabase(
+        $pdo
+    );
+
+    $directory =
+        createRunnerMigrationDirectory();
+
+    $sql =
+        "CREATE TABLE runner_lock_blocked (\n"
+        . "    id INT NOT NULL PRIMARY KEY\n"
+        . ") ENGINE=InnoDB;\n";
+
+    $secondPdo =
+        makeIndependentRunnerConnection(
+            $databaseConfig
+        );
+
+    $blockingLock =
+        new MigrationLock(
+            $secondPdo,
+            0
+        );
+
+    $blockingAcquired = false;
+
+    try {
+        writeRunnerMigration(
+            $directory,
+            '001_lock_blocked.sql',
+            $sql
+        );
+
+        $blockingLock->acquire();
+        $blockingAcquired = true;
+
+        $runner =
+            new MigrationRunner(
+                $pdo,
+                $directory,
+                0
+            );
+
+        $failure = null;
+
+        try {
+            $runner->run();
+        } catch (MigrationException $exception) {
+            $failure = $exception;
+        }
+
+        assertRunnerTrue(
+            $failure instanceof MigrationException,
+            'Runner deveria falhar quando outro processo possui o lock.'
+        );
+
+        assertRunnerTrue(
+            str_contains(
+                $failure->getMessage(),
+                'Tempo limite excedido'
+            ),
+            'Falha deveria indicar timeout ao adquirir o lock.'
+        );
+
+        assertRunnerTrue(
+            !runnerTableExists(
+                $pdo,
+                'schema_migrations'
+            ),
+            'Runner bloqueado não deveria preparar schema_migrations.'
+        );
+
+        assertRunnerTrue(
+            !runnerTableExists(
+                $pdo,
+                'runner_lock_blocked'
+            ),
+            'Runner bloqueado não deveria executar migrations.'
+        );
+    } finally {
+        if ($blockingAcquired) {
+            $blockingLock->release();
+        }
+
+        resetRunnerDatabase(
+            $pdo
+        );
+
+        removeRunnerMigrationDirectory(
+            $directory
+        );
+    }
+};
+
+$tests[
+    'libera lock após execução bem-sucedida'
+] = static function () use (
+    $pdo,
+    $databaseConfig
+): void {
+    resetRunnerDatabase(
+        $pdo
+    );
+
+    $directory =
+        createRunnerMigrationDirectory();
+
+    $sql =
+        "CREATE TABLE runner_lock_success (\n"
+        . "    id INT NOT NULL PRIMARY KEY\n"
+        . ") ENGINE=InnoDB;\n";
+
+    try {
+        writeRunnerMigration(
+            $directory,
+            '001_lock_success.sql',
+            $sql
+        );
+
+        $runner =
+            new MigrationRunner(
+                $pdo,
+                $directory,
+                0
+            );
+
+        assertRunnerSame(
+            1,
+            $runner->run(),
+            'Runner deveria aplicar a migration protegida pelo lock.'
+        );
+
+        $secondPdo =
+            makeIndependentRunnerConnection(
+                $databaseConfig
+            );
+
+        $secondLock =
+            new MigrationLock(
+                $secondPdo,
+                0
+            );
+
+        $secondAcquired = false;
+
+        try {
+            $secondLock->acquire();
+            $secondAcquired = true;
+
+            assertRunnerTrue(
+                $secondAcquired,
+                'Outra conexão deveria adquirir o lock após sucesso do Runner.'
+            );
+        } finally {
+            if ($secondAcquired) {
+                $secondLock->release();
+            }
+        }
+    } finally {
+        resetRunnerDatabase(
+            $pdo
+        );
+
+        removeRunnerMigrationDirectory(
+            $directory
+        );
+    }
+};
+
+$tests[
+    'libera lock após falha de migration'
+] = static function () use (
+    $pdo,
+    $databaseConfig
+): void {
+    resetRunnerDatabase(
+        $pdo
+    );
+
+    $directory =
+        createRunnerMigrationDirectory();
+
+    $sql =
+        "CREATE TABL runner_lock_failure (\n"
+        . "    id INT NOT NULL\n"
+        . ");\n";
+
+    try {
+        writeRunnerMigration(
+            $directory,
+            '001_lock_failure.sql',
+            $sql
+        );
+
+        $runner =
+            new MigrationRunner(
+                $pdo,
+                $directory,
+                0
+            );
+
+        $failure = null;
+
+        try {
+            $runner->run();
+        } catch (MigrationException $exception) {
+            $failure = $exception;
+        }
+
+        assertRunnerTrue(
+            $failure instanceof MigrationException,
+            'Runner deveria propagar a falha da migration.'
+        );
+
+        assertRunnerTrue(
+            str_contains(
+                $failure->getMessage(),
+                '001_lock_failure'
+            ),
+            'Falha deveria identificar a migration problemática.'
+        );
+
+        $secondPdo =
+            makeIndependentRunnerConnection(
+                $databaseConfig
+            );
+
+        $secondLock =
+            new MigrationLock(
+                $secondPdo,
+                0
+            );
+
+        $secondAcquired = false;
+
+        try {
+            $secondLock->acquire();
+            $secondAcquired = true;
+
+            assertRunnerTrue(
+                $secondAcquired,
+                'Outra conexão deveria adquirir o lock após falha do Runner.'
+            );
+        } finally {
+            if ($secondAcquired) {
+                $secondLock->release();
+            }
+        }
+    } finally {
+        resetRunnerDatabase(
+            $pdo
+        );
+
+        removeRunnerMigrationDirectory(
+            $directory
+        );
+    }
+};
 
 $tests[
     'aplica migrations pendentes e registra checksums'

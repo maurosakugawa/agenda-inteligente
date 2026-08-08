@@ -15,9 +15,12 @@ final class MigrationRunner
 
     private SchemaMigrationStore $store;
 
+    private MigrationLock $lock;
+
     public function __construct(
         private PDO $pdo,
-        string $migrationsPath
+        string $migrationsPath,
+        int $lockTimeoutSeconds = 5
     ) {
         $this->discovery =
             new MigrationDiscovery(
@@ -31,9 +34,53 @@ final class MigrationRunner
             new SchemaMigrationStore(
                 $pdo
             );
+
+        $this->lock =
+            new MigrationLock(
+                $pdo,
+                $lockTimeoutSeconds
+            );
     }
 
     public function run(): int
+    {
+        $this->lock->acquire();
+
+        $appliedCount = 0;
+        $failure = null;
+
+        try {
+            $appliedCount =
+                $this->runLocked();
+        } catch (Throwable $exception) {
+            $failure = $exception;
+        }
+
+        try {
+            $this->lock->release();
+        } catch (Throwable $releaseException) {
+            if ($failure !== null) {
+                throw new MigrationException(
+                    sprintf(
+                        'Falha durante migrations e também ao liberar lock: %s',
+                        $releaseException->getMessage()
+                    ),
+                    0,
+                    $failure
+                );
+            }
+
+            throw $releaseException;
+        }
+
+        if ($failure !== null) {
+            throw $failure;
+        }
+
+        return $appliedCount;
+    }
+
+    private function runLocked(): int
     {
         $this->store->ensureTable();
 
