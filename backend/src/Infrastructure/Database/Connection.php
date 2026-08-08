@@ -30,7 +30,7 @@ final class Connection
         );
 
         try {
-            self::$instance = new PDO(
+            $pdo = new PDO(
                 $dsn,
                 $config['username'],
                 $config['password'],
@@ -41,6 +41,12 @@ final class Connection
                     PDO::ATTR_STRINGIFY_FETCHES => false,
                 ]
             );
+
+            $pdo->exec(
+                "SET time_zone = '+00:00'"
+            );
+
+            self::$instance = $pdo;
         } catch (PDOException $exception) {
             throw new RuntimeException(
                 'Não foi possível estabelecer conexão com o banco de dados.',
