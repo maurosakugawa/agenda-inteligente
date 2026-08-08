@@ -2,17 +2,23 @@
 
 declare(strict_types=1);
 
+use AgendaInteligente\Application\Auth\CredentialValidator;
 use AgendaInteligente\Application\Auth\CsrfController;
+use AgendaInteligente\Application\Auth\RegisterController;
+use AgendaInteligente\Application\Auth\UserRegistrar;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Application\HttpKernel;
 use AgendaInteligente\Infrastructure\Config\ConfigurationException;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Middleware\CsrfMiddleware;
 use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\Router;
 use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
+use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
+use AgendaInteligente\Infrastructure\Security\PasswordHasher;
 use AgendaInteligente\Infrastructure\Session\SessionManager;
 
 require_once dirname(__DIR__) . '/autoload.php';
@@ -70,6 +76,10 @@ try {
         $sessionManager
     );
 
+    $csrfMiddleware = new CsrfMiddleware(
+        $csrfTokenManager
+    );
+
     $healthController = new HealthController(
         static function () use (
             $databaseConfig
@@ -91,13 +101,51 @@ try {
     );
 
     /**
+     * @var callable(Request): JsonResponse $registerHandler
+     */
+    $registerHandler = static function (
+        Request $request
+    ) use (
+        $databaseConfig
+    ): JsonResponse {
+        static $registerController = null;
+
+        if (
+            !$registerController instanceof RegisterController
+        ) {
+            $pdo = Connection::make(
+                $databaseConfig
+            );
+
+            $repository = new UserRepository(
+                $pdo
+            );
+
+            $registrar = new UserRegistrar(
+                $repository,
+                new PasswordHasher(),
+                new CredentialValidator()
+            );
+
+            $registerController = new RegisterController(
+                $registrar
+            );
+        }
+
+        return $registerController->handle(
+            $request
+        );
+    };
+
+    /**
      * @var callable(
      *     HealthController,
      *     CsrfController,
-     *     SessionMiddleware
+     *     SessionMiddleware,
+     *     CsrfMiddleware,
+     *     callable(Request): JsonResponse
      * ): Router $routeFactory
      */
-
     $routeFactory = require dirname(__DIR__)
         . '/routes/http.php';
 
@@ -105,7 +153,9 @@ try {
         $routeFactory(
             $healthController,
             $csrfController,
-            $sessionMiddleware
+            $sessionMiddleware,
+            $csrfMiddleware,
+            $registerHandler
         )
     );
 

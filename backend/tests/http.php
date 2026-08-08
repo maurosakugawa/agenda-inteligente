@@ -6,6 +6,7 @@ use AgendaInteligente\Application\Auth\CsrfController;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Application\HttpKernel;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Middleware\CsrfMiddleware;
 use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\MiddlewareInterface;
 use AgendaInteligente\Infrastructure\Http\Request;
@@ -13,6 +14,7 @@ use AgendaInteligente\Infrastructure\Http\RequestHandlerInterface;
 use AgendaInteligente\Infrastructure\Http\Router;
 use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
 use AgendaInteligente\Infrastructure\Session\SessionManager;
+
 
 require_once dirname(__DIR__) . '/autoload.php';
 
@@ -1035,21 +1037,38 @@ $tests['registra as duas rotas de health'] = static function (): void {
             $sessionPath
         );
 
+        $csrfTokenManager = new CsrfTokenManager(
+            $sessionManager
+        );
+
         $csrfController = new CsrfController(
-            new CsrfTokenManager(
-                $sessionManager
-            )
+            $csrfTokenManager
         );
 
         $sessionMiddleware = new SessionMiddleware(
             $sessionManager
         );
 
+        $csrfMiddleware = new CsrfMiddleware(
+            $csrfTokenManager
+        );
+
+        $registerHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'registered' => true,
+            ],
+            201
+        );
+
         /**
          * @var callable(
          *     HealthController,
          *     CsrfController,
-         *     SessionMiddleware
+         *     SessionMiddleware,
+         *     CsrfMiddleware,
+         *     callable(Request): JsonResponse
          * ): Router $routeFactory
          */
         $routeFactory = require dirname(__DIR__)
@@ -1058,7 +1077,9 @@ $tests['registra as duas rotas de health'] = static function (): void {
         $router = $routeFactory(
             $healthController,
             $csrfController,
-            $sessionMiddleware
+            $sessionMiddleware,
+            $csrfMiddleware,
+            $registerHandler
         );
 
         foreach (
@@ -1144,6 +1165,19 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
             $sessionManager
         );
 
+        $csrfMiddleware = new CsrfMiddleware(
+            $csrfTokenManager
+        );
+
+        $registerHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'registered' => true,
+            ],
+            201
+        );
+
         $healthController = new HealthController(
             static function (): void {
             }
@@ -1153,7 +1187,9 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
          * @var callable(
          *     HealthController,
          *     CsrfController,
-         *     SessionMiddleware
+         *     SessionMiddleware,
+         *     CsrfMiddleware,
+         *     callable(Request): JsonResponse
          * ): Router $routeFactory
          */
         $routeFactory = require dirname(__DIR__)
@@ -1162,7 +1198,9 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
         $router = $routeFactory(
             $healthController,
             $csrfController,
-            $sessionMiddleware
+            $sessionMiddleware,
+            $csrfMiddleware,
+            $registerHandler
         );
 
         assertHttpSame(
