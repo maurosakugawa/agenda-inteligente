@@ -42,7 +42,7 @@ function assertPasswordHasherSame(
 $tests = [];
 
 $tests[
-    'gera hash bcrypt com custo 10'
+    'gera hash compatível com PASSWORD_DEFAULT'
 ] = static function (): void {
     $hasher =
         new PasswordHasher();
@@ -65,21 +65,13 @@ $tests[
         'Senha não pode ser armazenada em texto puro.'
     );
 
-    $info =
-        password_get_info(
-            $hash
-        );
-
     assertPasswordHasherSame(
-        'bcrypt',
-        $info['algoName'] ?? null,
-        'Algoritmo de hash inesperado.'
-    );
-
-    assertPasswordHasherSame(
-        10,
-        $info['options']['cost'] ?? null,
-        'Custo bcrypt inesperado.'
+        false,
+        password_needs_rehash(
+            $hash,
+            PASSWORD_DEFAULT
+        ),
+        'Hash recém-gerado deveria estar compatível com PASSWORD_DEFAULT.'
     );
 };
 

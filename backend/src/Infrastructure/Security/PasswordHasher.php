@@ -6,17 +6,12 @@ namespace AgendaInteligente\Infrastructure\Security;
 
 final class PasswordHasher
 {
-    private const COST = 10;
-
     public function hash(
         string $password
     ): string {
         return password_hash(
             $password,
-            PASSWORD_BCRYPT,
-            [
-                'cost' => self::COST,
-            ]
+            PASSWORD_DEFAULT
         );
     }
 
