@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace AgendaInteligente\Infrastructure\Persistence;
 
 use PDO;
+use PDOException;
+use RuntimeException;
 
 final class UserRepository
 {
@@ -95,5 +97,67 @@ final class UserRepository
         return is_array($user)
             ? $user
             : null;
+    }
+
+    /**
+     * Cria um usuário ativo e retorna seu identificador.
+     *
+     * @throws DuplicateUsernameException
+     */
+    public function create(
+        string $username,
+        string $passwordHash
+    ): int {
+        $statement = $this->pdo->prepare(
+            "
+            INSERT INTO users (
+                username,
+                password_hash,
+                active,
+                created_at,
+                updated_at,
+                deleted_at
+            )
+            VALUES (
+                :username,
+                :password_hash,
+                1,
+                UTC_TIMESTAMP(),
+                UTC_TIMESTAMP(),
+                NULL
+            )
+            "
+        );
+
+        try {
+            $statement->execute([
+                ':username' => $username,
+                ':password_hash' => $passwordHash,
+            ]);
+        } catch (PDOException $exception) {
+            if (
+                $exception->getCode() === '23000'
+                && isset($exception->errorInfo[1])
+                && (int) $exception->errorInfo[1] === 1062
+            ) {
+                throw new DuplicateUsernameException(
+                    'Username já cadastrado.',
+                    0,
+                    $exception
+                );
+            }
+
+            throw $exception;
+        }
+
+        $id = (int) $this->pdo->lastInsertId();
+
+        if ($id <= 0) {
+            throw new RuntimeException(
+                'Não foi possível obter o identificador do usuário criado.'
+            );
+        }
+
+        return $id;
     }
 }
