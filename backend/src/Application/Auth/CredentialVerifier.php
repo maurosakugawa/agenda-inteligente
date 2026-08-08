@@ -10,17 +10,18 @@ use AgendaInteligente\Infrastructure\Security\PasswordHasher;
 final class CredentialVerifier
 {
     /**
-     * Hash bcrypt conhecido, com custo 10.
+     * Hash conhecido usado somente para executar uma verificação
+     * de senha também quando o usuário não existe.
      *
-     * Não é um segredo. Serve apenas para executar uma operação
-     * criptográfica equivalente quando o usuário não existe.
+     * Não é segredo e não representa uma credencial real.
      */
     private const DUMMY_PASSWORD_HASH =
         '$2y$10$Couj6hA0MXIG0Lij64Ii/.ZGdUmDFHaXfWmLCgt1YQUVbpI7h9LKO';
 
     public function __construct(
         private UserRepository $users,
-        private PasswordHasher $passwords
+        private PasswordHasher $passwords,
+        private CredentialValidator $credentials
     ) {
     }
 
@@ -34,6 +35,12 @@ final class CredentialVerifier
         string $username,
         string $password
     ): ?array {
+        $this->credentials
+            ->validateForLogin(
+                $username,
+                $password
+            );
+
         $user =
             $this->users->findByUsername(
                 $username

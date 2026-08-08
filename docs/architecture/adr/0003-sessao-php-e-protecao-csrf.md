@@ -504,6 +504,92 @@ Não deverão ser utilizados:
 - hash manual sem salt apropriado;
 - senha em texto puro.
 
+## Política de credenciais
+
+A validação das credenciais será diferente entre registro e login para
+preservar compatibilidade com usuários existentes e impedir que novas
+restrições de criação de credenciais invalidem contas já cadastradas.
+
+### Nome de usuário
+
+No registro, o nome de usuário deverá:
+
+- ser obrigatório;
+- possuir entre 3 e 100 caracteres Unicode;
+- possuir UTF-8 válido;
+- não possuir caracteres de controle;
+- não possuir espaços no início ou no fim;
+- permitir espaços internos;
+- permitir letras Unicode, números e pontuação.
+
+No login, o nome de usuário deverá:
+
+- ser obrigatório;
+- possuir no máximo 100 caracteres Unicode;
+- possuir UTF-8 válido;
+- não possuir caracteres de controle.
+
+O backend não deverá aplicar `trim()` silenciosamente ao nome de usuário.
+Valores com espaços indevidos deverão ser rejeitados pela validação, em vez
+de modificados antes da autenticação ou persistência.
+
+### Senha
+
+No registro, a senha deverá:
+
+- ser obrigatória;
+- possuir no mínimo 15 caracteres;
+- possuir no máximo 72 bytes;
+- permitir espaços;
+- permitir caracteres Unicode;
+- permitir letras, números e símbolos sem regras obrigatórias de composição.
+
+Não será obrigatório combinar artificialmente:
+
+- letras maiúsculas;
+- letras minúsculas;
+- números;
+- caracteres especiais.
+
+No login, a senha deverá:
+
+- ser obrigatória;
+- possuir no máximo 72 bytes;
+- não possuir comprimento mínimo além de não ser vazia.
+
+A diferença entre registro e login preserva a compatibilidade com usuários
+existentes que possam possuir senhas criadas antes desta política.
+
+A senha nunca deverá ser truncada silenciosamente.
+
+O limite máximo de 72 bytes acompanha o limite do algoritmo atualmente
+utilizado por `PASSWORD_DEFAULT` no PHP alvo. Como `PASSWORD_DEFAULT`
+pode mudar em versões futuras do PHP, esse limite deverá ser reavaliado
+quando o algoritmo padrão mudar.
+
+### Ordem da validação
+
+Os limites e formatos definidos nesta seção deverão ser validados antes do
+acesso ao repository.
+
+No registro, o fluxo será:
+
+    entrada
+      -> validação para registro
+      -> password_hash
+      -> repository
+
+No login, o fluxo será:
+
+    entrada
+      -> validação para login
+      -> localização do usuário
+      -> password_verify
+
+As regras de força aplicadas à criação de novas senhas não deverão impedir
+a autenticação de credenciais legadas válidas.
+
+
 ## Logout
 
 O endpoint continuará sendo:

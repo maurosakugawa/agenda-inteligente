@@ -2,42 +2,40 @@
 
 declare(strict_types=1);
 
+use AgendaInteligente\Application\Auth\CredentialValidator;
 use AgendaInteligente\Application\Auth\CredentialVerifier;
+use AgendaInteligente\Application\Auth\InvalidCredentialsInputException;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\PasswordHasher;
 
 require_once dirname(__DIR__) . '/autoload.php';
 
-$application =
-    require dirname(__DIR__)
-        . '/bootstrap.php';
-
-$databaseConfig =
-    $application['database'];
-
-$pdo =
-    Connection::make(
-        $databaseConfig
-    );
-
-$currentDatabase =
-    $pdo
-        ->query(
-            'SELECT DATABASE()'
-        )
-        ->fetchColumn();
-
-if (
-    $currentDatabase
-    !== 'agenda_inteligente_test'
-) {
-    fwrite(
-        STDERR,
-        "[ERRO] Teste recusado: conexão não está em agenda_inteligente_test.\n"
-    );
-
-    exit(1);
+/**
+ * @param mixed $expected
+ * @param mixed $actual
+ */
+function assertCredentialVerifierSame(
+    mixed $expected,
+    mixed $actual,
+    string $message
+): void {
+    if ($expected !== $actual) {
+        throw new RuntimeException(
+            sprintf(
+                '%s Esperado: %s. Recebido: %s.',
+                $message,
+                var_export(
+                    $expected,
+                    true
+                ),
+                var_export(
+                    $actual,
+                    true
+                )
+            )
+        );
+    }
 }
 
 function assertCredentialVerifierTrue(
@@ -51,29 +49,9 @@ function assertCredentialVerifierTrue(
     }
 }
 
-function assertCredentialVerifierSame(
-    mixed $expected,
-    mixed $actual,
-    string $message
-): void {
-    if ($expected !== $actual) {
-        throw new RuntimeException(
-            $message
-            . ' Esperado: '
-            . var_export(
-                $expected,
-                true
-            )
-            . '; obtido: '
-            . var_export(
-                $actual,
-                true
-            )
-        );
-    }
-}
-
 /**
+ * Cria um usuário exclusivamente para os testes.
+ *
  * @return array{
  *     id:int,
  *     username:string,
@@ -86,7 +64,7 @@ function createCredentialVerifierFixture(
     string $username,
     string $password,
     int $active = 1,
-    bool $deleted = false
+    ?string $deletedAt = null
 ): array {
     $passwordHash =
         $hasher->hash(
@@ -110,11 +88,7 @@ function createCredentialVerifierFixture(
                 :active,
                 UTC_TIMESTAMP(),
                 UTC_TIMESTAMP(),
-                CASE
-                    WHEN :deleted = 1
-                    THEN UTC_TIMESTAMP()
-                    ELSE NULL
-                END
+                :deleted_at
             )
             "
         );
@@ -123,9 +97,7 @@ function createCredentialVerifierFixture(
         ':username' => $username,
         ':password_hash' => $passwordHash,
         ':active' => $active,
-        ':deleted' => $deleted
-            ? 1
-            : 0,
+        ':deleted_at' => $deletedAt,
     ]);
 
     return [
@@ -133,6 +105,55 @@ function createCredentialVerifierFixture(
         'username' => $username,
         'password' => $password,
     ];
+}
+
+/**
+ * @var array{
+ *     database:array{
+ *         host:string,
+ *         port:int,
+ *         database:string,
+ *         username:string,
+ *         password:string,
+ *         charset:string
+ *     }
+ * } $application
+ */
+$application =
+    require dirname(__DIR__)
+        . '/bootstrap.php';
+
+$databaseConfig =
+    $application['database'];
+
+if (
+    $databaseConfig['database']
+    !== 'agenda_inteligente_test'
+) {
+    throw new RuntimeException(
+        'Este teste só pode ser executado no banco agenda_inteligente_test.'
+    );
+}
+
+$pdo =
+    Connection::make(
+        $databaseConfig
+    );
+
+$currentDatabase =
+    $pdo
+        ->query(
+            'SELECT DATABASE()'
+        )
+        ->fetchColumn();
+
+if (
+    $currentDatabase
+    !== 'agenda_inteligente_test'
+) {
+    throw new RuntimeException(
+        'Teste recusado: conexão não está em agenda_inteligente_test.'
+    );
 }
 
 $repository =
@@ -143,10 +164,14 @@ $repository =
 $hasher =
     new PasswordHasher();
 
+$validator =
+    new CredentialValidator();
+
 $verifier =
     new CredentialVerifier(
         $repository,
-        $hasher
+        $hasher,
+        $validator
     );
 
 $tests = [];
@@ -178,13 +203,13 @@ $tests[
             'username' => $fixture['username'],
         ],
         $identity,
-        'Identidade autenticada está incorreta.'
+        'Credenciais válidas deveriam retornar a identidade mínima.'
     );
 
     assertCredentialVerifierTrue(
         !array_key_exists(
             'password_hash',
-            $identity ?? []
+            $identity
         ),
         'A identidade não deve expor password_hash.'
     );
@@ -225,10 +250,7 @@ $tests[
 ): void {
     $identity =
         $verifier->verify(
-            'usuario_inexistente_'
-                . bin2hex(
-                    random_bytes(8)
-                ),
+            'usuario_inexistente_credential_test',
             'qualquer-senha'
         );
 
@@ -282,7 +304,7 @@ $tests[
             'credential_deleted_test',
             'senha-correta',
             1,
-            true
+            '2026-01-01 00:00:00'
         );
 
     $identity =
@@ -298,8 +320,29 @@ $tests[
     );
 };
 
+$tests[
+    'rejeita entrada estruturalmente inválida'
+] = static function () use (
+    $verifier
+): void {
+    try {
+        $verifier->verify(
+            '',
+            'senha'
+        );
+    } catch (InvalidCredentialsInputException) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Era esperada uma InvalidCredentialsInputException.'
+    );
+};
+
 $passed = 0;
-$total = count($tests);
+$total = count(
+    $tests
+);
 
 $pdo->beginTransaction();
 
@@ -333,7 +376,8 @@ try {
 
 fwrite(
     STDOUT,
-    "\nCredentialVerifier: {$passed}/{$total} teste(s) aprovado(s).\n"
+    "\nCredentialVerifier: "
+    . "{$passed}/{$total} teste(s) aprovado(s).\n"
 );
 
 exit(
