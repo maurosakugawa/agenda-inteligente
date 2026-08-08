@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AgendaInteligente\Infrastructure\Http;
 
+use JsonException;
+
 final class Request
 {
     /**
@@ -14,18 +16,26 @@ final class Request
         private string $method,
         private string $path,
         private array $headers = [],
+        private string $body = '',
         private array $routeParams = []
     ) {
     }
 
     public static function fromGlobals(): self
     {
+        $body = file_get_contents(
+            'php://input'
+        );
+
         return self::create(
             (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'),
             (string) ($_SERVER['REQUEST_URI'] ?? '/'),
             self::headersFromServer(
                 $_SERVER
-            )
+            ),
+            is_string($body)
+                ? $body
+                : ''
         );
     }
 
@@ -35,7 +45,8 @@ final class Request
     public static function create(
         string $method,
         string $uri,
-        array $headers = []
+        array $headers = [],
+        string $body = ''
     ): self {
         $normalizedMethod = strtoupper(
             trim($method)
@@ -57,7 +68,8 @@ final class Request
         return new self(
             $normalizedMethod,
             self::normalizePath($path),
-            self::normalizeHeaders($headers)
+            self::normalizeHeaders($headers),
+            $body
         );
     }
 
@@ -94,6 +106,72 @@ final class Request
         return $this->headers[
             $normalizedName
         ] ?? null;
+    }
+
+    public function body(): string
+    {
+        return $this->body;
+    }
+
+    /**
+     * @return array<string, mixed>
+     *
+     * @throws InvalidJsonBodyException
+     */
+    public function json(): array
+    {
+        $body = trim(
+            $this->body
+        );
+
+        if ($body === '') {
+            throw new InvalidJsonBodyException(
+                'O corpo da requisição deve conter um objeto JSON válido.'
+            );
+        }
+
+        try {
+            $decoded = json_decode(
+                $body,
+                true,
+                512,
+                JSON_THROW_ON_ERROR
+            );
+        } catch (JsonException $exception) {
+            throw new InvalidJsonBodyException(
+                'O corpo da requisição deve conter um objeto JSON válido.',
+                0,
+                $exception
+            );
+        }
+
+        /*
+         * A API trabalha com documentos JSON cuja raiz é um objeto.
+         *
+         * json_decode(..., true) converte tanto:
+         *
+         *     {}
+         *
+         * quanto:
+         *
+         *     []
+         *
+         * para arrays PHP. Por isso também verificamos o primeiro
+         * caractere do documento original.
+         */
+        if (
+            !is_array($decoded)
+            || !str_starts_with(
+                $body,
+                '{'
+            )
+        ) {
+            throw new InvalidJsonBodyException(
+                'O corpo da requisição deve conter um objeto JSON válido.'
+            );
+        }
+
+        return $decoded;
     }
 
     /**

@@ -301,6 +301,224 @@ $tests['captura headers a partir dos globals'] = static function (): void {
     }
 };
 
+$tests['armazena corpo bruto da requisição'] = static function (): void {
+    $body = <<<'JSON'
+{"username":"mauro","password":"senha-teste"}
+JSON;
+
+    $request = Request::create(
+        'POST',
+        '/auth/login',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        $body
+    );
+
+    assertHttpSame(
+        $body,
+        $request->body(),
+        'O corpo bruto da requisição foi alterado.'
+    );
+};
+
+$tests['decodifica objeto JSON da requisição'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/auth/login',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        <<<'JSON'
+{
+    "username": "mauro",
+    "password": "senha-teste",
+    "metadata": {
+        "origin": "web"
+    }
+}
+JSON
+    );
+
+    assertHttpSame(
+        [
+            'username' => 'mauro',
+            'password' => 'senha-teste',
+            'metadata' => [
+                'origin' => 'web',
+            ],
+        ],
+        $request->json(),
+        'O corpo JSON não foi decodificado corretamente.'
+    );
+};
+
+$tests['aceita objeto JSON vazio'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '{}'
+    );
+
+    assertHttpSame(
+        [],
+        $request->json(),
+        'Um objeto JSON vazio não foi aceito.'
+    );
+};
+
+$tests['rejeita corpo JSON vazio'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        ''
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um corpo JSON vazio foi aceito.'
+    );
+};
+
+$tests['rejeita JSON malformado'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '{"username":"mauro"'
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um JSON malformado foi aceito.'
+    );
+};
+
+$tests['rejeita array como raiz JSON'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '["mauro","teste"]'
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um array JSON foi aceito como objeto de requisição.'
+    );
+};
+
+$tests['rejeita valor escalar como raiz JSON'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '"mauro"'
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um valor JSON escalar foi aceito como objeto de requisição.'
+    );
+};
+
+$tests['roteador converte JSON inválido em erro HTTP 400'] = static function (): void {
+    $handlerExecutions = new ArrayObject();
+
+    $router = new Router();
+
+    $router->add(
+        'POST',
+        '/auth/teste-json',
+        static function (
+            Request $request
+        ) use (
+            $handlerExecutions
+        ): JsonResponse {
+            $handlerExecutions->append(
+                true
+            );
+
+            $input = $request->json();
+
+            return JsonResponse::success(
+                [
+                    'input' => $input,
+                ]
+            );
+        }
+    );
+
+    $response = $router->handle(
+        Request::create(
+            'POST',
+            '/auth/teste-json',
+            [
+                'Content-Type' => 'application/json',
+            ],
+            '{"username":'
+        )
+    );
+
+    assertHttpSame(
+        400,
+        $response->statusCode(),
+        'JSON inválido não retornou HTTP 400.'
+    );
+
+    assertHttpSame(
+        'invalid_json_body',
+        $response->payload()['error']['code'] ?? null,
+        'O código do erro de JSON inválido está incorreto.'
+    );
+
+    assertHttpSame(
+        1,
+        $handlerExecutions->count(),
+        'O handler não chegou até a tentativa de interpretar o JSON.'
+    );
+};
+
 $tests['cria resposta JSON de sucesso'] = static function (): void {
     $response = JsonResponse::success(
         [
