@@ -841,9 +841,34 @@ event_time = 14:00:00
 
 Esses valores não deverão ser convertidos automaticamente para UTC durante a migração.
 
-A aplicação ainda não possui, no contrato atual, um campo confiável de fuso horário associado ao evento ou ao usuário.
+Na primeira versão da aplicação, `event_date` e `event_time` serão interpretados no fuso horário civil:
 
-Combinar esses valores em `starts_at` e convertê-los para UTC poderia:
+```text
+America/Sao_Paulo
+```
+
+Esse é o fuso adotado pela Agenda Inteligente para representar o horário de Brasília na operação da aplicação.
+
+Assim, um compromisso informado como:
+
+```text
+event_date = 2026-08-10
+event_time = 14:00:00
+```
+
+continuará sendo apresentado e tratado como 14:00 no horário civil de `America/Sao_Paulo`.
+
+A configuração operacional da aplicação deverá permanecer coerente com essa decisão por meio de:
+
+```text
+app.timezone = America/Sao_Paulo
+```
+
+A aplicação ainda não possui, no contrato atual, um campo de fuso horário associado individualmente ao evento ou ao usuário.
+
+A introdução futura de fusos por usuário ou por evento exigirá decisão arquitetural própria e não deverá alterar silenciosamente o significado dos registros já persistidos.
+
+Combinar `event_date` e `event_time` em `starts_at` e convertê-los automaticamente para UTC poderia:
 
 - alterar o dia do evento;
 - alterar a hora exibida;
@@ -852,16 +877,23 @@ Combinar esses valores em `starts_at` e convertê-los para UTC poderia:
 - afetar consultas meteorológicas;
 - produzir resultados diferentes entre ambientes.
 
-Os timestamps técnicos:
+Essa regra de horário civil não se aplica aos timestamps técnicos.
+
+Os timestamps técnicos definidos neste ADR:
 
 ```text
 created_at
 updated_at
+deleted_at
 ```
 
-serão armazenados e tratados em UTC.
+quando existentes na respectiva entidade, serão armazenados e tratados em UTC.
 
-A API continuará enviando `event_date` e `event_time` no formato esperado pelo frontend.
+As sessões de banco utilizadas pela aplicação deverão operar em UTC para que valores produzidos pelo próprio MySQL ou MariaDB, como `CURRENT_TIMESTAMP`, sigam a mesma referência temporal.
+
+Quando um timestamp técnico precisar ser apresentado ao usuário, a aplicação deverá convertê-lo de UTC para `America/Sao_Paulo`.
+
+A API continuará enviando `event_date` e `event_time` no formato esperado pelo frontend, preservando seu significado de data e horário civil.
 
 ## Eventos sem horário
 
