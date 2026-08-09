@@ -187,6 +187,46 @@ $tests['usa valores padrão para requisição vazia'] = static function (): void
     );
 };
 
+$tests[
+    'adiciona atributo sem modificar requisição original'
+] = static function (): void {
+    $request = Request::create(
+        'GET',
+        '/teste'
+    );
+
+    $enriched =
+        $request->withAttribute(
+            'authenticated_user_id',
+            42
+        );
+
+    assertHttpSame(
+        null,
+        $request->attribute(
+            'authenticated_user_id'
+        ),
+        'A requisição original foi modificada.'
+    );
+
+    assertHttpSame(
+        42,
+        $enriched->attribute(
+            'authenticated_user_id'
+        ),
+        'O atributo não foi adicionado à nova requisição.'
+    );
+
+    assertHttpSame(
+        'fallback',
+        $enriched->attribute(
+            'inexistente',
+            'fallback'
+        ),
+        'O valor padrão de atributo não foi respeitado.'
+    );
+};
+
 $tests['armazena endereço remoto informado na criação'] = static function (): void {
     $request = Request::create(
         'POST',
@@ -932,6 +972,70 @@ $tests['executa middlewares em ordem determinística'] = static function (): voi
         ],
         $trace->getArrayCopy(),
         'A ordem do pipeline está incorreta.'
+    );
+};
+
+$tests[
+    'propaga request enriquecido pelo pipeline'
+] = static function (): void {
+    $middleware =
+        new class implements MiddlewareInterface {
+            public function process(
+                Request $request,
+                RequestHandlerInterface $next
+            ): JsonResponse {
+                return $next->handle(
+                    $request->withAttribute(
+                        'authenticated_user_id',
+                        42
+                    )
+                );
+            }
+        };
+
+    $router = new Router();
+
+    $router->get(
+        '/contexto',
+        static function (
+            Request $request
+        ): JsonResponse {
+            return JsonResponse::success(
+                [
+                    'authenticated_user_id' =>
+                        $request->attribute(
+                            'authenticated_user_id'
+                        ),
+                ]
+            );
+        },
+        [
+            $middleware,
+        ]
+    );
+
+    $response =
+        $router->handle(
+            Request::create(
+                'GET',
+                '/contexto'
+            )
+        );
+
+    assertHttpSame(
+        200,
+        $response->statusCode(),
+        'O pipeline alterou o status da resposta.'
+    );
+
+    assertHttpSame(
+        42,
+        $response->payload()[
+            'data'
+        ][
+            'authenticated_user_id'
+        ] ?? null,
+        'O Request enriquecido não chegou ao handler.'
     );
 };
 

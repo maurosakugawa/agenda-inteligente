@@ -11,6 +11,7 @@ final class Request
     /**
      * @param array<string, string> $headers
      * @param array<string, string> $routeParams
+     * @param array<string, mixed> $attributes
      */
     private function __construct(
         private string $method,
@@ -18,7 +19,8 @@ final class Request
         private array $headers = [],
         private string $body = '',
         private ?string $remoteAddress = null,
-        private array $routeParams = []
+        private array $routeParams = [],
+        private array $attributes = []
     ) {
     }
 
@@ -214,6 +216,36 @@ final class Request
     ): ?string {
         return $this->routeParams[$name]
             ?? null;
+    }
+
+    public function withAttribute(
+        string $name,
+        mixed $value
+    ): self {
+        $request = clone $this;
+
+        $request->attributes[$name] =
+            $value;
+
+        return $request;
+    }
+
+    public function attribute(
+        string $name,
+        mixed $default = null
+    ): mixed {
+        if (
+            !array_key_exists(
+                $name,
+                $this->attributes
+            )
+        ) {
+            return $default;
+        }
+
+        return $this->attributes[
+            $name
+        ];
     }
 
     private static function normalizePath(
