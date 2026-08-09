@@ -17,6 +17,7 @@ final class Request
         private string $path,
         private array $headers = [],
         private string $body = '',
+        private ?string $remoteAddress = null,
         private array $routeParams = []
     ) {
     }
@@ -27,6 +28,10 @@ final class Request
             'php://input'
         );
 
+        $remoteAddress =
+            $_SERVER['REMOTE_ADDR']
+            ?? null;
+
         return self::create(
             (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'),
             (string) ($_SERVER['REQUEST_URI'] ?? '/'),
@@ -35,7 +40,10 @@ final class Request
             ),
             is_string($body)
                 ? $body
-                : ''
+                : '',
+            is_string($remoteAddress)
+                ? $remoteAddress
+                : null
         );
     }
 
@@ -46,7 +54,8 @@ final class Request
         string $method,
         string $uri,
         array $headers = [],
-        string $body = ''
+        string $body = '',
+        ?string $remoteAddress = null
     ): self {
         $normalizedMethod = strtoupper(
             trim($method)
@@ -69,7 +78,8 @@ final class Request
             $normalizedMethod,
             self::normalizePath($path),
             self::normalizeHeaders($headers),
-            $body
+            $body,
+            $remoteAddress
         );
     }
 
@@ -111,6 +121,11 @@ final class Request
     public function body(): string
     {
         return $this->body;
+    }
+
+    public function remoteAddress(): ?string
+    {
+        return $this->remoteAddress;
     }
 
     /**

@@ -179,6 +179,28 @@ $tests['usa valores padrão para requisição vazia'] = static function (): void
         $request->path(),
         'O caminho padrão está incorreto.'
     );
+
+    assertHttpSame(
+        null,
+        $request->remoteAddress(),
+        'O endereço remoto padrão deveria ser null.'
+    );
+};
+
+$tests['armazena endereço remoto informado na criação'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [],
+        '',
+        '203.0.113.10'
+    );
+
+    assertHttpSame(
+        '203.0.113.10',
+        $request->remoteAddress(),
+        'O endereço remoto informado na criação não foi preservado.'
+    );
 };
 
 $tests['normaliza e consulta headers sem diferenciar maiúsculas'] = static function (): void {
@@ -248,8 +270,10 @@ $tests['captura headers a partir dos globals'] = static function (): void {
             'REQUEST_URI' => '/api/teste?origem=globals',
             'HTTP_X_CSRF_TOKEN' => 'csrf-global',
             'HTTP_ACCEPT' => 'application/json',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.99',
             'CONTENT_TYPE' => 'application/json; charset=utf-8',
             'CONTENT_LENGTH' => '42',
+            'REMOTE_ADDR' => '198.51.100.20',
         ];
 
         $request =
@@ -265,6 +289,20 @@ $tests['captura headers a partir dos globals'] = static function (): void {
             '/api/teste',
             $request->path(),
             'O caminho vindo dos globals está incorreto.'
+        );
+
+        assertHttpSame(
+            '198.51.100.20',
+            $request->remoteAddress(),
+            'REMOTE_ADDR não foi preservado como origem da requisição.'
+        );
+
+        assertHttpSame(
+            '203.0.113.99',
+            $request->header(
+                'X-Forwarded-For'
+            ),
+            'X-Forwarded-For deveria continuar disponível apenas como header.'
         );
 
         assertHttpSame(
@@ -297,6 +335,37 @@ $tests['captura headers a partir dos globals'] = static function (): void {
                 'Content-Length'
             ),
             'CONTENT_LENGTH não foi convertido corretamente.'
+        );
+    } finally {
+        $_SERVER = $originalServer;
+    }
+};
+
+$tests['usa null quando REMOTE_ADDR está ausente'] = static function (): void {
+    $originalServer = $_SERVER;
+
+    try {
+        $_SERVER = [
+            'REQUEST_METHOD' => 'GET',
+            'REQUEST_URI' => '/teste',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.200',
+        ];
+
+        $request =
+            Request::fromGlobals();
+
+        assertHttpSame(
+            null,
+            $request->remoteAddress(),
+            'REMOTE_ADDR ausente deveria resultar em null.'
+        );
+
+        assertHttpSame(
+            '203.0.113.200',
+            $request->header(
+                'X-Forwarded-For'
+            ),
+            'O header encaminhado não deveria ser descartado.'
         );
     } finally {
         $_SERVER = $originalServer;
