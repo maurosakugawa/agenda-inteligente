@@ -6,6 +6,7 @@ use AgendaInteligente\Application\Auth\CredentialValidator;
 use AgendaInteligente\Application\Auth\CredentialVerifier;
 use AgendaInteligente\Application\Auth\CsrfController;
 use AgendaInteligente\Application\Auth\LoginController;
+use AgendaInteligente\Application\Auth\LoginRateLimiter;
 use AgendaInteligente\Application\Auth\RegisterController;
 use AgendaInteligente\Application\Auth\UserRegistrar;
 use AgendaInteligente\Application\Health\HealthController;
@@ -18,6 +19,7 @@ use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\Router;
 use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
+use AgendaInteligente\Infrastructure\Persistence\MySqlRateLimitRepository;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
 use AgendaInteligente\Infrastructure\Security\PasswordHasher;
@@ -62,6 +64,24 @@ try {
      * } $sessionConfig
      */
     $sessionConfig = $config['session'];
+
+    /**
+     * @var array{
+     *     key_secret:string,
+     *     ip:array{
+     *         max_attempts:int,
+     *         window_seconds:int,
+     *         block_seconds:int
+     *     },
+     *     username_ip:array{
+     *         max_failures:int,
+     *         window_seconds:int,
+     *         block_seconds:int
+     *     }
+     * } $loginRateLimitConfig
+     */
+    $loginRateLimitConfig =
+        $config['login_rate_limit'];
 
     $sessionManager = new SessionManager(
         $sessionConfig
@@ -152,6 +172,7 @@ try {
         Request $request
     ) use (
         $databaseConfig,
+        $loginRateLimitConfig,
         $authenticatedSession
     ): JsonResponse {
         static $loginController = null;
@@ -167,14 +188,27 @@ try {
                 $pdo
             );
 
+            $credentials =
+                new CredentialValidator();
+
             $verifier = new CredentialVerifier(
                 $repository,
                 new PasswordHasher(),
-                new CredentialValidator()
+                $credentials
             );
+
+            $rateLimiter =
+                new LoginRateLimiter(
+                    new MySqlRateLimitRepository(
+                        $pdo
+                    ),
+                    $loginRateLimitConfig
+                );
 
             $loginController = new LoginController(
                 $verifier,
+                $credentials,
+                $rateLimiter,
                 $authenticatedSession
             );
         }
