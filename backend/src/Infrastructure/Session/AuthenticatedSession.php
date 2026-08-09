@@ -44,4 +44,9 @@ final class AuthenticatedSession
 
         return $this->csrf->rotate();
     }
+
+    public function terminate(): void
+    {
+        $this->session->destroy();
+    }
 }

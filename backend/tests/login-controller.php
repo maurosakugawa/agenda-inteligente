@@ -109,6 +109,11 @@ final class LoginControllerAuthenticationSessionFake
 
         return $this->csrfToken;
     }
+
+    public function terminate(): void
+    {
+    }
+
 }
 
 final class LoginControllerRateLimitRepositoryFake

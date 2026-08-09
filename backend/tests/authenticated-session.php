@@ -514,6 +514,113 @@ $tests[
     }
 };
 
+$tests[
+    'destrói sessão autenticada e invalida csrf'
+] = static function (): void {
+    $sessionPath =
+        sys_get_temp_dir()
+        . '/agenda-authenticated-session-'
+        . bin2hex(
+            random_bytes(8)
+        );
+
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
+    ) {
+        throw new RuntimeException(
+            'Não foi possível criar diretório temporário de sessão.'
+        );
+    }
+
+    try {
+        $session =
+            new SessionManager(
+                authenticatedSessionConfig(),
+                $sessionPath,
+                static fn (): int =>
+                    2_000_000
+            );
+
+        $csrf =
+            new CsrfTokenManager(
+                $session,
+                static fn (
+                    int $length
+                ): string => str_repeat(
+                    "\x33",
+                    $length
+                )
+            );
+
+        $authenticatedSession =
+            new AuthenticatedSession(
+                $session,
+                $csrf,
+                static fn (): int =>
+                    2_000_123
+            );
+
+        $session->start();
+
+        $token =
+            $authenticatedSession->establish(
+                [
+                    'id' => 42,
+                    'username' =>
+                        'authenticated_session_logout_test',
+                ]
+            );
+
+        assertAuthenticatedSessionSame(
+            true,
+            $csrf->validate(
+                $token
+            ),
+            'Token CSRF autenticado deveria estar válido antes do logout.'
+        );
+
+        $authenticatedSession->terminate();
+
+        assertAuthenticatedSessionSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'A sessão permaneceu ativa após terminate().'
+        );
+
+        /*
+         * Reabrir a sessão permite comprovar que os dados
+         * destruídos não permanecem disponíveis no servidor.
+         */
+        $session->start();
+
+        assertAuthenticatedSessionSame(
+            null,
+            $session->get(
+                'auth'
+            ),
+            'A identidade autenticada permaneceu após logout.'
+        );
+
+        assertAuthenticatedSessionSame(
+            false,
+            $csrf->validate(
+                $token
+            ),
+            'O token CSRF autenticado anterior permaneceu válido.'
+        );
+
+        $session->destroy();
+    } finally {
+        removeAuthenticatedSessionDirectory(
+            $sessionPath
+        );
+    }
+};
+
 $results = [];
 $passed = 0;
 $total = count(

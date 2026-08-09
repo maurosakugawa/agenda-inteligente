@@ -15,4 +15,6 @@ interface AuthenticationSession
     public function establish(
         array $identity
     ): string;
+
+    public function terminate(): void;
 }
