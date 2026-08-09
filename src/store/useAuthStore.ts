@@ -12,6 +12,32 @@ interface User {
   username: string;
 }
 
+interface ApiError {
+  code?: unknown;
+  message?: unknown;
+}
+
+interface ApiResponse {
+  success?: unknown;
+  error?: ApiError | string;
+  message?: unknown;
+}
+
+interface LoginResponse extends ApiResponse {
+  data?: {
+    message?: unknown;
+    user?: User;
+    csrf_token?: unknown;
+  };
+}
+
+interface RegisterResponse extends ApiResponse {
+  data?: {
+    message?: unknown;
+    userId?: unknown;
+  };
+}
+
 interface AuthStore {
   user: User | null;
   loading: boolean;
@@ -37,6 +63,40 @@ function getErrorMessage(error: unknown): string {
     : "Não foi possível concluir a operação.";
 }
 
+function getApiErrorMessage(
+  payload: ApiResponse | null,
+  fallback: string
+): string {
+  if (payload === null) {
+    return fallback;
+  }
+
+  if (
+    typeof payload.error === "string" &&
+    payload.error.trim()
+  ) {
+    return payload.error;
+  }
+
+  if (
+    payload.error &&
+    typeof payload.error === "object" &&
+    typeof payload.error.message === "string" &&
+    payload.error.message.trim()
+  ) {
+    return payload.error.message;
+  }
+
+  if (
+    typeof payload.message === "string" &&
+    payload.message.trim()
+  ) {
+    return payload.message;
+  }
+
+  return fallback;
+}
+
 export const useAuthStore =
   create<AuthStore>((set) => ({
     user: null,
@@ -52,16 +112,20 @@ export const useAuthStore =
           await apiFetch("/auth/me");
 
         if (response.ok) {
+          /**
+           * /auth/me preserva intencionalmente
+           * o contrato sem envelope:
+           *
+           * {
+           *   "id": 1,
+           *   "username": "usuario"
+           * }
+           */
           const user =
             await response.json() as User;
 
           set({ user });
         } else {
-          /**
-           * Se a sessão deixou de ser autenticada,
-           * qualquer token CSRF associado à sessão
-           * anterior não deve continuar no cache.
-           */
           if (response.status === 401) {
             clearCsrfToken();
           }
@@ -69,11 +133,6 @@ export const useAuthStore =
           set({ user: null });
         }
       } catch {
-        /**
-         * Uma falha de rede não significa
-         * necessariamente que a sessão expirou.
-         * Por isso não invalidamos o CSRF aqui.
-         */
         set({ user: null });
       } finally {
         set({
@@ -106,41 +165,44 @@ export const useAuthStore =
             }
           );
 
-        const data =
-          await response.json() as {
-            error?: string;
-            user?: User;
-          };
+        const payload =
+          await response
+            .json()
+            .catch(() => null) as
+              | LoginResponse
+              | null;
 
-        if (!response.ok || !data.user) {
+        const user =
+          payload?.data?.user;
+
+        if (!response.ok || !user) {
           throw new Error(
-            data.error || "Login falhou."
+            getApiErrorMessage(
+              payload,
+              "Login falhou."
+            )
           );
         }
 
         /**
-         * O backend regenera a sessão após
-         * autenticação bem-sucedida.
-         *
-         * O token usado no POST /auth/login
-         * pertence à sessão anterior e deve ser
-         * substituído pelo token da nova sessão.
-         *
-         * Se a renovação imediata falhar por um
-         * problema transitório de rede, o login já
-         * ocorreu no servidor. Mantemos a sessão
-         * autenticada e deixamos o cache vazio para
-         * que a próxima mutação tente obter outro
-         * token automaticamente.
+         * O backend regenera a sessão durante
+         * o login. O token usado para autenticar
+         * pertence à sessão anterior.
          */
         try {
           await refreshCsrfToken();
         } catch {
+          /**
+           * O login já ocorreu no servidor.
+           * Mantemos o usuário autenticado e
+           * deixamos a próxima mutação obter
+           * novamente um token.
+           */
           clearCsrfToken();
         }
 
         set({
-          user: data.user,
+          user,
           loading: false,
           initialized: true,
         });
@@ -178,14 +240,19 @@ export const useAuthStore =
             }
           );
 
-        const data =
-          await response.json() as {
-            error?: string;
-          };
+        const payload =
+          await response
+            .json()
+            .catch(() => null) as
+              | RegisterResponse
+              | null;
 
         if (!response.ok) {
           throw new Error(
-            data.error || "Registro falhou."
+            getApiErrorMessage(
+              payload,
+              "Registro falhou."
+            )
           );
         }
 
@@ -206,11 +273,6 @@ export const useAuthStore =
 
     logout: async () => {
       try {
-        /**
-         * O CSRF precisa continuar disponível até
-         * o POST terminar, pois logout também é uma
-         * operação mutável protegida.
-         */
         await apiFetch(
           "/auth/logout",
           {
@@ -218,11 +280,6 @@ export const useAuthStore =
           }
         );
       } finally {
-        /**
-         * Depois da tentativa de encerramento da
-         * sessão, nenhum token da identidade
-         * anterior permanece no frontend.
-         */
         clearCsrfToken();
 
         set({
