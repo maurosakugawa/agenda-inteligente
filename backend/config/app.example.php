@@ -27,6 +27,23 @@ return [
         'absolute_timeout' => 28800,
     ],
 
+    'login_rate_limit' => [
+        'key_secret' =>
+            'troque-este-segredo-de-rate-limit-com-32-bytes-ou-mais',
+
+        'ip' => [
+            'max_attempts' => 20,
+            'window_seconds' => 300,
+            'block_seconds' => 900,
+        ],
+
+        'username_ip' => [
+            'max_failures' => 5,
+            'window_seconds' => 900,
+            'block_seconds' => 900,
+        ],
+    ],
+
     'weather' => [
         'api_key' => '',
         'base_url' => 'https://api.openweathermap.org',
