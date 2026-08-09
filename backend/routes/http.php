@@ -16,7 +16,8 @@ return static function (
     SessionMiddleware $sessionMiddleware,
     CsrfMiddleware $csrfMiddleware,
     callable $registerHandler,
-    callable $loginHandler
+    callable $loginHandler,
+    callable $logoutHandler
 ): Router {
     $router = new Router();
 
@@ -66,6 +67,16 @@ return static function (
         'POST',
         '/auth/login',
         $loginHandler,
+        [
+            $sessionMiddleware,
+            $csrfMiddleware,
+        ]
+    );
+
+    $router->add(
+        'POST',
+        '/auth/logout',
+        $logoutHandler,
         [
             $sessionMiddleware,
             $csrfMiddleware,

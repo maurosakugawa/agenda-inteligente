@@ -167,6 +167,18 @@ function buildRegisterRouteTestContext(
             $csrf
         );
 
+    $logoutHandler =
+        static function (
+            Request $request
+        ): JsonResponse {
+            return JsonResponse::success(
+                [
+                    'logged_out' => true,
+                ],
+                200
+            );
+        };
+
     $healthController =
         new HealthController(
             static function (): void {
@@ -222,6 +234,7 @@ function buildRegisterRouteTestContext(
      *     SessionMiddleware,
      *     CsrfMiddleware,
      *     callable(Request): JsonResponse,
+     *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse
      * ): Router $routeFactory
      */
@@ -236,7 +249,8 @@ function buildRegisterRouteTestContext(
             $sessionMiddleware,
             $csrfMiddleware,
             $registerHandler,
-            $loginHandler
+            $loginHandler,
+            $logoutHandler
         );
 
     return [

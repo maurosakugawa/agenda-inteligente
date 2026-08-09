@@ -7,6 +7,7 @@ use AgendaInteligente\Application\Auth\CredentialVerifier;
 use AgendaInteligente\Application\Auth\CsrfController;
 use AgendaInteligente\Application\Auth\LoginController;
 use AgendaInteligente\Application\Auth\LoginRateLimiter;
+use AgendaInteligente\Application\Auth\LogoutController;
 use AgendaInteligente\Application\Auth\RegisterController;
 use AgendaInteligente\Application\Auth\UserRegistrar;
 use AgendaInteligente\Application\Health\HealthController;
@@ -218,12 +219,29 @@ try {
         );
     };
 
+    $logoutController =
+        new LogoutController(
+            $authenticatedSession
+        );
+
+    /**
+     * @var callable(Request): JsonResponse $logoutHandler
+     */
+    $logoutHandler = static function (
+        Request $request
+    ) use (
+        $logoutController
+    ): JsonResponse {
+        return $logoutController->handle();
+    };
+
     /**
      * @var callable(
      *     HealthController,
      *     CsrfController,
      *     SessionMiddleware,
      *     CsrfMiddleware,
+     *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse
      * ): Router $routeFactory
@@ -238,7 +256,8 @@ try {
             $sessionMiddleware,
             $csrfMiddleware,
             $registerHandler,
-            $loginHandler
+            $loginHandler,
+            $logoutHandler
         )
     );
 

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AgendaInteligente\Application\Auth\CsrfController;
+use AgendaInteligente\Application\Auth\LogoutController;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
 use AgendaInteligente\Infrastructure\Http\Middleware\CsrfMiddleware;
@@ -19,7 +20,7 @@ require_once dirname(__DIR__) . '/autoload.php';
  * @param mixed $expected
  * @param mixed $actual
  */
-function assertLoginRouteSame(
+function assertLogoutRouteSame(
     mixed $expected,
     mixed $actual,
     string $message
@@ -42,7 +43,7 @@ function assertLoginRouteSame(
     }
 }
 
-function assertLoginRouteTrue(
+function assertLogoutRouteTrue(
     bool $condition,
     string $message
 ): void {
@@ -62,11 +63,11 @@ function assertLoginRouteTrue(
  *     absolute_timeout:int
  * }
  */
-function loginRouteSessionConfig(): array
+function logoutRouteSessionConfig(): array
 {
     return [
         'name' =>
-            'AGENDA_INTELIGENTE_LOGIN_ROUTE_TEST',
+            'AGENDA_INTELIGENTE_LOGOUT_ROUTE_TEST',
         'secure' => false,
         'same_site' => 'Lax',
         'idle_timeout' => 1800,
@@ -74,7 +75,7 @@ function loginRouteSessionConfig(): array
     ];
 }
 
-function resetLoginRouteNativeSession(): void
+function resetLogoutRouteNativeSession(): void
 {
     if (
         session_status()
@@ -95,7 +96,7 @@ function resetLoginRouteNativeSession(): void
     $_SESSION = [];
 }
 
-function removeLoginRouteSessionDirectory(
+function removeLogoutRouteSessionDirectory(
     string $sessionPath
 ): void {
     if (!is_dir($sessionPath)) {
@@ -129,16 +130,17 @@ function removeLoginRouteSessionDirectory(
  *     router:Router,
  *     session:SessionManager,
  *     csrf:CsrfTokenManager,
- *     handlerCalls:ArrayObject
+ *     authenticated_session:AuthenticatedSession,
+ *     handler_calls:ArrayObject
  * }
  */
-function buildLoginRouteTestContext(
+function buildLogoutRouteTestContext(
     string $sessionPath,
     int &$now
 ): array {
     $session =
         new SessionManager(
-            loginRouteSessionConfig(),
+            logoutRouteSessionConfig(),
             $sessionPath,
             static function () use (
                 &$now
@@ -159,10 +161,15 @@ function buildLoginRouteTestContext(
             ): string {
                 ++$randomCall;
 
+                $byte =
+                    match ($randomCall) {
+                        1 => "\x11",
+                        2 => "\x22",
+                        default => "\x33",
+                    };
+
                 return str_repeat(
-                    $randomCall === 1
-                        ? "\x11"
-                        : "\x22",
+                    $byte,
                     $length
                 );
             }
@@ -194,74 +201,32 @@ function buildLoginRouteTestContext(
             }
         );
 
+    $logoutController =
+        new LogoutController(
+            $authenticatedSession
+        );
+
     $handlerCalls =
         new ArrayObject();
 
-    $loginHandler =
+    $logoutHandler =
         static function (
             Request $request
         ) use (
             $handlerCalls,
             $session,
-            $authenticatedSession
+            $logoutController
         ): JsonResponse {
             $handlerCalls->append(
                 true
             );
 
-            assertLoginRouteTrue(
+            assertLogoutRouteTrue(
                 $session->isStarted(),
-                'O handler de login recebeu a requisição sem sessão ativa.'
+                'O handler de logout recebeu a requisição sem sessão ativa.'
             );
 
-            $input =
-                $request->json();
-
-            $username =
-                $input['username']
-                ?? null;
-
-            $password =
-                $input['password']
-                ?? null;
-
-            if (
-                !is_string($username)
-                || !is_string($password)
-            ) {
-                return JsonResponse::error(
-                    'invalid_credentials_input',
-                    'Username e senha são obrigatórios.',
-                    400
-                );
-            }
-
-            $identity = [
-                'id' => 42,
-                'username' =>
-                    $username,
-            ];
-
-            $newCsrfToken =
-                $authenticatedSession->establish(
-                    $identity
-                );
-
-            return JsonResponse::success(
-                [
-                    'message' =>
-                        'Login realizado',
-                    'user' => [
-                        'id' =>
-                            $identity['id'],
-                        'username' =>
-                            $identity['username'],
-                    ],
-                    'csrf_token' =>
-                        $newCsrfToken,
-                ],
-                200
-            );
+            return $logoutController->handle();
         };
 
     $registerHandler =
@@ -276,13 +241,13 @@ function buildLoginRouteTestContext(
             );
         };
 
-    $logoutHandler =
+    $loginHandler =
         static function (
             Request $request
         ): JsonResponse {
             return JsonResponse::success(
                 [
-                    'logged_out' => true,
+                    'logged_in' => true,
                 ],
                 200
             );
@@ -324,7 +289,9 @@ function buildLoginRouteTestContext(
         'router' => $router,
         'session' => $session,
         'csrf' => $csrf,
-        'handlerCalls' =>
+        'authenticated_session' =>
+            $authenticatedSession,
+        'handler_calls' =>
             $handlerCalls,
     ];
 }
@@ -337,11 +304,11 @@ function buildLoginRouteTestContext(
  *     output:string
  * }
  */
-function runLoginRouteTest(
+function runLogoutRouteTest(
     string $name,
     callable $test
 ): array {
-    resetLoginRouteNativeSession();
+    resetLogoutRouteNativeSession();
 
     try {
         $test();
@@ -359,18 +326,18 @@ function runLoginRouteTest(
                 . $exception->getMessage(),
         ];
     } finally {
-        resetLoginRouteNativeSession();
+        resetLogoutRouteNativeSession();
     }
 }
 
 $tests = [];
 
 $tests[
-    'bloqueia login sem token csrf antes do handler'
+    'bloqueia logout sem token csrf antes do handler'
 ] = static function (): void {
     $sessionPath =
         sys_get_temp_dir()
-        . '/agenda-login-route-'
+        . '/agenda-logout-route-'
         . bin2hex(
             random_bytes(8)
         );
@@ -391,7 +358,7 @@ $tests[
         $now = 1_000_000;
 
         $context =
-            buildLoginRouteTestContext(
+            buildLogoutRouteTestContext(
                 $sessionPath,
                 $now
             );
@@ -400,30 +367,17 @@ $tests[
             $context['router']->handle(
                 Request::create(
                     'POST',
-                    '/auth/login',
-                    [
-                        'Content-Type' =>
-                            'application/json',
-                    ],
-                    json_encode(
-                        [
-                            'username' =>
-                                'login_route_test',
-                            'password' =>
-                                'senha-valida-de-login',
-                        ],
-                        JSON_THROW_ON_ERROR
-                    )
+                    '/auth/logout'
                 )
             );
 
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             403,
             $response->statusCode(),
-            'Login sem CSRF não retornou 403.'
+            'Logout sem CSRF não retornou 403.'
         );
 
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             'csrf_invalid',
             $response
                 ->payload()['error']['code']
@@ -431,32 +385,34 @@ $tests[
             'Código de erro CSRF está incorreto.'
         );
 
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             0,
-            $context['handlerCalls']->count(),
-            'Handler de login foi executado sem CSRF.'
+            $context[
+                'handler_calls'
+            ]->count(),
+            'Handler de logout foi executado sem CSRF.'
         );
 
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             PHP_SESSION_NONE,
             session_status(),
             'Sessão permaneceu aberta após bloqueio CSRF.'
         );
     } finally {
-        resetLoginRouteNativeSession();
+        resetLogoutRouteNativeSession();
 
-        removeLoginRouteSessionDirectory(
+        removeLogoutRouteSessionDirectory(
             $sessionPath
         );
     }
 };
 
 $tests[
-    'autentica com csrf e estabelece nova sessão'
+    'encerra sessão autenticada com csrf válido'
 ] = static function (): void {
     $sessionPath =
         sys_get_temp_dir()
-        . '/agenda-login-route-'
+        . '/agenda-logout-route-'
         . bin2hex(
             random_bytes(8)
         );
@@ -477,7 +433,7 @@ $tests[
         $now = 2_000_000;
 
         $context =
-            buildLoginRouteTestContext(
+            buildLogoutRouteTestContext(
                 $sessionPath,
                 $now
             );
@@ -490,214 +446,115 @@ $tests[
                 )
             );
 
-        assertLoginRouteSame(
-            200,
-            $csrfResponse->statusCode(),
-            'Obtenção de CSRF não retornou 200.'
-        );
-
-        $oldToken =
+        $anonymousToken =
             $csrfResponse
                 ->payload()['csrf_token']
                 ?? null;
 
-        assertLoginRouteTrue(
+        assertLogoutRouteTrue(
             is_string(
-                $oldToken
+                $anonymousToken
             ),
             'Rota CSRF não retornou token.'
         );
 
-        assertLoginRouteSame(
-            str_repeat(
-                '11',
-                32
-            ),
-            $oldToken,
-            'Token CSRF anônimo está incorreto.'
-        );
-
-        $oldSessionId =
-            session_id();
-
-        assertLoginRouteTrue(
-            $oldSessionId !== '',
-            'Sessão anônima não possui identificador.'
-        );
-
-        assertLoginRouteSame(
-            PHP_SESSION_NONE,
-            session_status(),
-            'Sessão anônima permaneceu aberta após obter CSRF.'
-        );
+        $context['session']->start();
 
         $now = 2_000_123;
+
+        $authenticatedToken =
+            $context[
+                'authenticated_session'
+            ]->establish(
+                [
+                    'id' => 42,
+                    'username' =>
+                        'logout_route_test',
+                ]
+            );
+
+        assertLogoutRouteTrue(
+            $anonymousToken
+            !== $authenticatedToken,
+            'Login simulado não rotacionou o CSRF.'
+        );
+
+        $context['session']->close();
 
         $response =
             $context['router']->handle(
                 Request::create(
                     'POST',
-                    '/auth/login',
+                    '/auth/logout',
                     [
-                        'Content-Type' =>
-                            'application/json',
                         'X-CSRF-Token' =>
-                            $oldToken,
-                    ],
-                    json_encode(
-                        [
-                            'username' =>
-                                'login_route_test',
-                            'password' =>
-                                'senha-valida-de-login',
-                        ],
-                        JSON_THROW_ON_ERROR
-                    )
+                            $authenticatedToken,
+                    ]
                 )
             );
 
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             200,
             $response->statusCode(),
-            'Login válido não retornou 200.'
+            'Logout autenticado não retornou 200.'
         );
 
-        assertLoginRouteSame(
-            1,
-            $context['handlerCalls']->count(),
-            'Handler de login não foi executado exatamente uma vez.'
-        );
-
-        assertLoginRouteSame(
-            [
-                'id' => 42,
-                'username' =>
-                    'login_route_test',
-            ],
+        assertLogoutRouteSame(
+            'Logout realizado',
             $response
-                ->payload()['data']['user']
+                ->payload()['data']['message']
                 ?? null,
-            'Usuário retornado pelo login está incorreto.'
+            'Mensagem de logout está incorreta.'
         );
 
-        $newToken =
-            $response
-                ->payload()['data']['csrf_token']
-                ?? null;
-
-        assertLoginRouteSame(
-            str_repeat(
-                '22',
-                32
-            ),
-            $newToken,
-            'Novo token CSRF está incorreto.'
+        assertLogoutRouteSame(
+            1,
+            $context[
+                'handler_calls'
+            ]->count(),
+            'Handler de logout não executou exatamente uma vez.'
         );
 
-        assertLoginRouteTrue(
-            $oldToken !== $newToken,
-            'O token CSRF não foi rotacionado.'
-        );
-
-        $newSessionId =
-            session_id();
-
-        assertLoginRouteTrue(
-            $newSessionId !== '',
-            'Sessão autenticada não possui identificador.'
-        );
-
-        assertLoginRouteTrue(
-            $oldSessionId !== $newSessionId,
-            'O identificador da sessão não foi regenerado.'
-        );
-
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             PHP_SESSION_NONE,
             session_status(),
-            'Sessão permaneceu aberta após login.'
+            'Sessão permaneceu ativa após logout.'
         );
 
         $context['session']->start();
 
-        assertLoginRouteSame(
-            [
-                'user_id' => 42,
-                'username' =>
-                    'login_route_test',
-                'authenticated_at' =>
-                    2_000_123,
-            ],
+        assertLogoutRouteSame(
+            null,
             $context['session']->get(
                 'auth'
             ),
-            'Estado autenticado persistido está incorreto.'
+            'Identidade autenticada permaneceu após logout.'
         );
 
-        $security =
-            $context['session']->get(
-                'security'
-            );
-
-        assertLoginRouteSame(
-            2_000_123,
-            $security['created_at']
-                ?? null,
-            'created_at não foi renovado durante login.'
-        );
-
-        assertLoginRouteSame(
-            2_000_123,
-            $security['last_activity_at']
-                ?? null,
-            'last_activity_at não foi renovado durante login.'
-        );
-
-        assertLoginRouteSame(
-            2_028_923,
-            $security['absolute_expires_at']
-                ?? null,
-            'absolute_expires_at não foi renovado durante login.'
-        );
-
-        assertLoginRouteSame(
-            $newToken,
-            $context['csrf']->currentToken(),
-            'Token retornado não corresponde ao token persistido.'
-        );
-
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             false,
             $context['csrf']->validate(
-                $oldToken
+                $authenticatedToken
             ),
-            'Token CSRF anterior permaneceu válido.'
-        );
-
-        assertLoginRouteSame(
-            true,
-            $context['csrf']->validate(
-                $newToken
-            ),
-            'Novo token CSRF não é válido.'
+            'CSRF autenticado anterior permaneceu válido.'
         );
 
         $context['session']->destroy();
     } finally {
-        resetLoginRouteNativeSession();
+        resetLogoutRouteNativeSession();
 
-        removeLoginRouteSessionDirectory(
+        removeLogoutRouteSessionDirectory(
             $sessionPath
         );
     }
 };
 
 $tests[
-    'json inválido com csrf válido retorna 400 e fecha sessão'
+    'permite logout anônimo com csrf válido'
 ] = static function (): void {
     $sessionPath =
         sys_get_temp_dir()
-        . '/agenda-login-route-'
+        . '/agenda-logout-route-'
         . bin2hex(
             random_bytes(8)
         );
@@ -718,7 +575,7 @@ $tests[
         $now = 3_000_000;
 
         $context =
-            buildLoginRouteTestContext(
+            buildLogoutRouteTestContext(
                 $sessionPath,
                 $now
             );
@@ -736,57 +593,68 @@ $tests[
                 ->payload()['csrf_token']
                 ?? null;
 
-        assertLoginRouteTrue(
+        assertLogoutRouteTrue(
             is_string(
                 $token
             ),
-            'Não foi possível obter token CSRF.'
+            'Sessão anônima não recebeu CSRF.'
         );
 
         $response =
             $context['router']->handle(
                 Request::create(
                     'POST',
-                    '/auth/login',
+                    '/auth/logout',
                     [
-                        'Content-Type' =>
-                            'application/json',
                         'X-CSRF-Token' =>
                             $token,
-                    ],
-                    '{"username":'
+                    ]
                 )
             );
 
-        assertLoginRouteSame(
-            400,
+        assertLogoutRouteSame(
+            200,
             $response->statusCode(),
-            'JSON inválido não retornou 400.'
+            'Logout anônimo com CSRF válido não retornou 200.'
         );
 
-        assertLoginRouteSame(
-            'invalid_json_body',
+        assertLogoutRouteSame(
+            'Logout realizado',
             $response
-                ->payload()['error']['code']
+                ->payload()['data']['message']
                 ?? null,
-            'JSON inválido retornou código incorreto.'
+            'Resposta do logout anônimo está incorreta.'
         );
 
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             1,
-            $context['handlerCalls']->count(),
-            'Handler deveria receber a requisição após CSRF válido.'
+            $context[
+                'handler_calls'
+            ]->count(),
+            'Handler não executou no logout anônimo válido.'
         );
 
-        assertLoginRouteSame(
+        assertLogoutRouteSame(
             PHP_SESSION_NONE,
             session_status(),
-            'Sessão permaneceu aberta após JSON inválido.'
+            'Sessão anônima permaneceu ativa após logout.'
         );
-    } finally {
-        resetLoginRouteNativeSession();
 
-        removeLoginRouteSessionDirectory(
+        $context['session']->start();
+
+        assertLogoutRouteSame(
+            false,
+            $context['csrf']->validate(
+                $token
+            ),
+            'CSRF anônimo anterior permaneceu válido após logout.'
+        );
+
+        $context['session']->destroy();
+    } finally {
+        resetLogoutRouteNativeSession();
+
+        removeLogoutRouteSessionDirectory(
             $sessionPath
         );
     }
@@ -794,15 +662,13 @@ $tests[
 
 $results = [];
 $passed = 0;
-
-$total =
-    count(
-        $tests
-    );
+$total = count(
+    $tests
+);
 
 foreach ($tests as $name => $test) {
     $result =
-        runLoginRouteTest(
+        runLogoutRouteTest(
             $name,
             $test
         );
@@ -824,7 +690,7 @@ foreach ($results as $result) {
 
 fwrite(
     STDOUT,
-    "\nLogin route: "
+    "\nLogout route: "
     . "{$passed}/{$total} teste(s) aprovado(s).\n"
 );
 

@@ -1140,12 +1140,22 @@ $tests['registra as duas rotas de health'] = static function (): void {
             200
         );
 
+        $logoutHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_out' => true,
+            ],
+            200
+        );
+
         /**
          * @var callable(
          *     HealthController,
          *     CsrfController,
          *     SessionMiddleware,
          *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse
          * ): Router $routeFactory
@@ -1159,7 +1169,8 @@ $tests['registra as duas rotas de health'] = static function (): void {
             $sessionMiddleware,
             $csrfMiddleware,
             $registerHandler,
-            $loginHandler
+            $loginHandler,
+            $logoutHandler
         );
 
         foreach (
@@ -1267,6 +1278,15 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
             200
         );
 
+        $logoutHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_out' => true,
+            ],
+            200
+        );
+
         $healthController = new HealthController(
             static function (): void {
             }
@@ -1278,6 +1298,7 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
          *     CsrfController,
          *     SessionMiddleware,
          *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse
          * ): Router $routeFactory
@@ -1291,7 +1312,8 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
             $sessionMiddleware,
             $csrfMiddleware,
             $registerHandler,
-            $loginHandler
+            $loginHandler,
+            $logoutHandler
         );
 
         assertHttpSame(
