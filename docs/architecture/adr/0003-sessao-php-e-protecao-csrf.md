@@ -1070,17 +1070,40 @@ A política definitiva para dados locais de múltiplos usuários deverá ser def
 
 Login e registro deverão possuir limitação de requisições.
 
-A limitação poderá considerar:
+Para o login, a política utilizará dois escopos complementares:
 
-- endereço IP;
-- nome de usuário normalizado;
-- janela de tempo;
-- quantidade de falhas;
-- bloqueio temporário.
+- limite geral por endereço IP, destinado a restringir volume excessivo
+  de tentativas;
+- limite de falhas pela combinação entre nome de usuário e endereço IP,
+  destinado a restringir tentativas repetidas contra uma mesma identidade
+  sem criar bloqueio global baseado apenas no nome de usuário.
 
-A limitação não deverá depender exclusivamente da sessão, pois um atacante pode descartar cookies.
+O estado do rate limiting deverá ser compartilhado entre requisições e
+não poderá depender exclusivamente da sessão, pois um atacante pode
+descartar cookies.
 
-Os detalhes serão definidos na implementação de segurança e rate limiting.
+A primeira implementação persistirá esse estado no banco de dados
+relacional MySQL utilizado pela aplicação.
+
+A camada de aplicação deverá permanecer desacoplada do mecanismo
+concreto de persistência, permitindo substituição futura sem alterar
+o fluxo de autenticação.
+
+Quantidade máxima de tentativas, duração das janelas e período de
+bloqueio serão parâmetros operacionais configuráveis. Esses valores
+poderão ser ajustados sem alteração do algoritmo, da persistência ou
+do contrato HTTP.
+
+O bloqueio deverá ser temporário.
+
+Falhas de CSRF e entradas estruturalmente inválidas não deverão ser
+contabilizadas como falhas de credenciais do login.
+
+A política de limitação não poderá revelar se o nome de usuário
+informado corresponde a uma conta existente.
+
+Quando uma tentativa for impedida pela política de rate limiting, a
+resposta deverá utilizar `429 Too Many Requests`.
 
 ## Logs de segurança
 
