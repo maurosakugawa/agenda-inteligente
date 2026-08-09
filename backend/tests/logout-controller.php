@@ -77,6 +77,11 @@ final class LogoutControllerAuthenticationSessionFake
         return 'csrf-nao-utilizado';
     }
 
+    public function current(): ?array
+    {
+        return null;
+    }
+
     public function terminate(): void
     {
         ++$this->terminateCalls;

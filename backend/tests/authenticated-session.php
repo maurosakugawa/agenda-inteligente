@@ -621,6 +621,233 @@ $tests[
     }
 };
 
+$tests[
+    'retorna null quando sessão é anônima'
+] = static function (): void {
+    $sessionPath =
+        sys_get_temp_dir()
+        . '/agenda-authenticated-session-'
+        . bin2hex(
+            random_bytes(8)
+        );
+
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
+    ) {
+        throw new RuntimeException(
+            'Não foi possível criar diretório temporário de sessão.'
+        );
+    }
+
+    try {
+        $session =
+            new SessionManager(
+                authenticatedSessionConfig(),
+                $sessionPath,
+                static fn (): int =>
+                    3_000_000
+            );
+
+        $csrf =
+            new CsrfTokenManager(
+                $session
+            );
+
+        $authenticatedSession =
+            new AuthenticatedSession(
+                $session,
+                $csrf
+            );
+
+        $session->start();
+
+        assertAuthenticatedSessionSame(
+            null,
+            $authenticatedSession->current(),
+            'Sessão anônima não retornou null.'
+        );
+
+        assertAuthenticatedSessionSame(
+            PHP_SESSION_ACTIVE,
+            session_status(),
+            'Leitura anônima destruiu a sessão.'
+        );
+
+        $session->destroy();
+    } finally {
+        removeAuthenticatedSessionDirectory(
+            $sessionPath
+        );
+    }
+};
+
+$tests[
+    'retorna identidade autenticada atual'
+] = static function (): void {
+    $sessionPath =
+        sys_get_temp_dir()
+        . '/agenda-authenticated-session-'
+        . bin2hex(
+            random_bytes(8)
+        );
+
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
+    ) {
+        throw new RuntimeException(
+            'Não foi possível criar diretório temporário de sessão.'
+        );
+    }
+
+    try {
+        $session =
+            new SessionManager(
+                authenticatedSessionConfig(),
+                $sessionPath,
+                static fn (): int =>
+                    4_000_000
+            );
+
+        $csrf =
+            new CsrfTokenManager(
+                $session
+            );
+
+        $authenticatedSession =
+            new AuthenticatedSession(
+                $session,
+                $csrf,
+                static fn (): int =>
+                    4_000_123
+            );
+
+        $session->start();
+
+        $authenticatedSession->establish(
+            [
+                'id' => 42,
+                'username' =>
+                    'authenticated_session_current_test',
+            ]
+        );
+
+        assertAuthenticatedSessionSame(
+            [
+                'id' => 42,
+                'username' =>
+                    'authenticated_session_current_test',
+            ],
+            $authenticatedSession->current(),
+            'Identidade autenticada atual está incorreta.'
+        );
+
+        assertAuthenticatedSessionSame(
+            PHP_SESSION_ACTIVE,
+            session_status(),
+            'Leitura válida encerrou a sessão.'
+        );
+
+        $session->destroy();
+    } finally {
+        removeAuthenticatedSessionDirectory(
+            $sessionPath
+        );
+    }
+};
+
+$tests[
+    'destrói sessão com identidade autenticada corrompida'
+] = static function (): void {
+    $sessionPath =
+        sys_get_temp_dir()
+        . '/agenda-authenticated-session-'
+        . bin2hex(
+            random_bytes(8)
+        );
+
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
+    ) {
+        throw new RuntimeException(
+            'Não foi possível criar diretório temporário de sessão.'
+        );
+    }
+
+    try {
+        $session =
+            new SessionManager(
+                authenticatedSessionConfig(),
+                $sessionPath,
+                static fn (): int =>
+                    5_000_000
+            );
+
+        $csrf =
+            new CsrfTokenManager(
+                $session
+            );
+
+        $authenticatedSession =
+            new AuthenticatedSession(
+                $session,
+                $csrf
+            );
+
+        $session->start();
+
+        $session->set(
+            'auth',
+            [
+                'user_id' => '42',
+                'username' =>
+                    'authenticated_session_corrupted_test',
+                'authenticated_at' =>
+                    5_000_000,
+            ]
+        );
+
+        assertAuthenticatedSessionSame(
+            null,
+            $authenticatedSession->current(),
+            'Estado autenticado corrompido não retornou null.'
+        );
+
+        assertAuthenticatedSessionSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'Estado autenticado corrompido não destruiu a sessão.'
+        );
+
+        $session->start();
+
+        assertAuthenticatedSessionSame(
+            null,
+            $session->get(
+                'auth'
+            ),
+            'Estado autenticado corrompido permaneceu persistido.'
+        );
+
+        $session->destroy();
+    } finally {
+        removeAuthenticatedSessionDirectory(
+            $sessionPath
+        );
+    }
+};
+
 $results = [];
 $passed = 0;
 $total = count(

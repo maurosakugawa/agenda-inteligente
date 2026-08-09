@@ -16,5 +16,13 @@ interface AuthenticationSession
         array $identity
     ): string;
 
+    /**
+     * @return array{
+     *     id:int,
+     *     username:string
+     * }|null
+     */
+    public function current(): ?array;
+
     public function terminate(): void;
 }

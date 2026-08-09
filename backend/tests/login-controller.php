@@ -110,6 +110,11 @@ final class LoginControllerAuthenticationSessionFake
         return $this->csrfToken;
     }
 
+    public function current(): ?array
+    {
+        return null;
+    }
+
     public function terminate(): void
     {
     }
