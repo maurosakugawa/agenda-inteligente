@@ -7,6 +7,7 @@ namespace AgendaInteligente\Application\Auth;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 
 final class CurrentUserResolver
+    implements CurrentUserProvider
 {
     public function __construct(
         private AuthenticationSession $session,

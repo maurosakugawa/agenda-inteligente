@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use AgendaInteligente\Application\Auth\AuthenticationSession;
+use AgendaInteligente\Application\Auth\CurrentUserProvider;
 use AgendaInteligente\Application\Auth\CurrentUserResolver;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
@@ -182,6 +183,29 @@ $repository =
     );
 
 $tests = [];
+
+$tests[
+    'implementa contrato de resolução do usuário atual'
+] = static function () use (
+    $repository
+): void {
+    $session =
+        new CurrentUserResolverAuthenticationSessionFake(
+            null
+        );
+
+    $resolver =
+        new CurrentUserResolver(
+            $session,
+            $repository
+        );
+
+    assertCurrentUserResolverSame(
+        true,
+        $resolver instanceof CurrentUserProvider,
+        'CurrentUserResolver não implementa CurrentUserProvider.'
+    );
+};
 
 $tests[
     'retorna null para sessão anônima sem encerrar sessão'
