@@ -3,13 +3,16 @@
 declare(strict_types=1);
 
 use AgendaInteligente\Application\Auth\CsrfController;
-use AgendaInteligente\Application\Auth\LogoutController;
+use AgendaInteligente\Application\Auth\CurrentUserResolver;
+use AgendaInteligente\Application\Auth\MeController;
 use AgendaInteligente\Application\Health\HealthController;
+use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
 use AgendaInteligente\Infrastructure\Http\Middleware\CsrfMiddleware;
 use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\Router;
+use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
 use AgendaInteligente\Infrastructure\Session\AuthenticatedSession;
 use AgendaInteligente\Infrastructure\Session\SessionManager;
@@ -20,7 +23,7 @@ require_once dirname(__DIR__) . '/autoload.php';
  * @param mixed $expected
  * @param mixed $actual
  */
-function assertLogoutRouteSame(
+function assertMeRouteSame(
     mixed $expected,
     mixed $actual,
     string $message
@@ -43,7 +46,7 @@ function assertLogoutRouteSame(
     }
 }
 
-function assertLogoutRouteTrue(
+function assertMeRouteTrue(
     bool $condition,
     string $message
 ): void {
@@ -63,11 +66,11 @@ function assertLogoutRouteTrue(
  *     absolute_timeout:int
  * }
  */
-function logoutRouteSessionConfig(): array
+function meRouteSessionConfig(): array
 {
     return [
         'name' =>
-            'AGENDA_INTELIGENTE_LOGOUT_ROUTE_TEST',
+            'AGENDA_INTELIGENTE_ME_ROUTE_TEST',
         'secure' => false,
         'same_site' => 'Lax',
         'idle_timeout' => 1800,
@@ -75,7 +78,7 @@ function logoutRouteSessionConfig(): array
     ];
 }
 
-function resetLogoutRouteNativeSession(): void
+function resetMeRouteNativeSession(): void
 {
     if (
         session_status()
@@ -96,7 +99,7 @@ function resetLogoutRouteNativeSession(): void
     $_SESSION = [];
 }
 
-function removeLogoutRouteSessionDirectory(
+function removeMeRouteSessionDirectory(
     string $sessionPath
 ): void {
     if (!is_dir($sessionPath)) {
@@ -127,20 +130,68 @@ function removeLogoutRouteSessionDirectory(
 
 /**
  * @return array{
+ *     id:int,
+ *     username:string
+ * }
+ */
+function createMeRouteFixture(
+    PDO $pdo,
+    string $username,
+    int $active = 1
+): array {
+    $statement =
+        $pdo->prepare(
+            "
+            INSERT INTO users (
+                username,
+                password_hash,
+                active,
+                created_at,
+                updated_at,
+                deleted_at
+            )
+            VALUES (
+                :username,
+                :password_hash,
+                :active,
+                UTC_TIMESTAMP(),
+                UTC_TIMESTAMP(),
+                NULL
+            )
+            "
+        );
+
+    $statement->execute([
+        ':username' => $username,
+        ':password_hash' =>
+            'hash-nao-utilizado-no-teste-me-route',
+        ':active' => $active,
+    ]);
+
+    return [
+        'id' =>
+            (int) $pdo->lastInsertId(),
+        'username' =>
+            $username,
+    ];
+}
+
+/**
+ * @return array{
  *     router:Router,
  *     session:SessionManager,
- *     csrf:CsrfTokenManager,
  *     authenticated_session:AuthenticatedSession,
  *     handler_calls:ArrayObject
  * }
  */
-function buildLogoutRouteTestContext(
+function buildMeRouteTestContext(
+    PDO $pdo,
     string $sessionPath,
     int &$now
 ): array {
     $session =
         new SessionManager(
-            logoutRouteSessionConfig(),
+            meRouteSessionConfig(),
             $sessionPath,
             static function () use (
                 &$now
@@ -149,30 +200,9 @@ function buildLogoutRouteTestContext(
             }
         );
 
-    $randomCall = 0;
-
     $csrf =
         new CsrfTokenManager(
-            $session,
-            static function (
-                int $length
-            ) use (
-                &$randomCall
-            ): string {
-                ++$randomCall;
-
-                $byte =
-                    match ($randomCall) {
-                        1 => "\x11",
-                        2 => "\x22",
-                        default => "\x33",
-                    };
-
-                return str_repeat(
-                    $byte,
-                    $length
-                );
-            }
+            $session
         );
 
     $csrfController =
@@ -201,32 +231,43 @@ function buildLogoutRouteTestContext(
             }
         );
 
-    $logoutController =
-        new LogoutController(
-            $authenticatedSession
+    $repository =
+        new UserRepository(
+            $pdo
+        );
+
+    $resolver =
+        new CurrentUserResolver(
+            $authenticatedSession,
+            $repository
+        );
+
+    $meController =
+        new MeController(
+            $resolver
         );
 
     $handlerCalls =
         new ArrayObject();
 
-    $logoutHandler =
+    $meHandler =
         static function (
             Request $request
         ) use (
             $handlerCalls,
             $session,
-            $logoutController
+            $meController
         ): JsonResponse {
             $handlerCalls->append(
                 true
             );
 
-            assertLogoutRouteTrue(
+            assertMeRouteTrue(
                 $session->isStarted(),
-                'O handler de logout recebeu a requisição sem sessão ativa.'
+                'O handler de /auth/me recebeu a requisição sem sessão ativa.'
             );
 
-            return $logoutController->handle();
+            return $meController->handle();
         };
 
     $registerHandler =
@@ -253,25 +294,23 @@ function buildLogoutRouteTestContext(
             );
         };
 
+    $logoutHandler =
+        static function (
+            Request $request
+        ): JsonResponse {
+            return JsonResponse::success(
+                [
+                    'logged_out' => true,
+                ],
+                200
+            );
+        };
+
     $healthController =
         new HealthController(
             static function (): void {
             }
         );
-
-    $meHandler =
-        static function (
-            Request $request
-        ): JsonResponse {
-            return new JsonResponse(
-                [
-                    'id' => 1,
-                    'username' =>
-                        'me_route_nao_utilizado',
-                ],
-                200
-            );
-        };
 
     /**
      * @var callable(
@@ -304,7 +343,6 @@ function buildLogoutRouteTestContext(
     return [
         'router' => $router,
         'session' => $session,
-        'csrf' => $csrf,
         'authenticated_session' =>
             $authenticatedSession,
         'handler_calls' =>
@@ -320,11 +358,11 @@ function buildLogoutRouteTestContext(
  *     output:string
  * }
  */
-function runLogoutRouteTest(
+function runMeRouteTest(
     string $name,
     callable $test
 ): array {
-    resetLogoutRouteNativeSession();
+    resetMeRouteNativeSession();
 
     try {
         $test();
@@ -342,18 +380,69 @@ function runLogoutRouteTest(
                 . $exception->getMessage(),
         ];
     } finally {
-        resetLogoutRouteNativeSession();
+        resetMeRouteNativeSession();
     }
+}
+
+/**
+ * @var array{
+ *     database:array{
+ *         host:string,
+ *         port:int,
+ *         database:string,
+ *         username:string,
+ *         password:string,
+ *         charset:string
+ *     }
+ * } $application
+ */
+$application =
+    require dirname(__DIR__)
+        . '/bootstrap.php';
+
+$databaseConfig =
+    $application['database'];
+
+if (
+    $databaseConfig['database']
+    !== 'agenda_inteligente_test'
+) {
+    throw new RuntimeException(
+        'Este teste só pode ser executado no banco agenda_inteligente_test.'
+    );
+}
+
+$pdo =
+    Connection::make(
+        $databaseConfig
+    );
+
+$currentDatabase =
+    $pdo
+        ->query(
+            'SELECT DATABASE()'
+        )
+        ->fetchColumn();
+
+if (
+    $currentDatabase
+    !== 'agenda_inteligente_test'
+) {
+    throw new RuntimeException(
+        'Teste recusado: conexão não está em agenda_inteligente_test.'
+    );
 }
 
 $tests = [];
 
 $tests[
-    'bloqueia logout sem token csrf antes do handler'
-] = static function (): void {
+    'retorna 401 para sessão anônima'
+] = static function () use (
+    $pdo
+): void {
     $sessionPath =
         sys_get_temp_dir()
-        . '/agenda-logout-route-'
+        . '/agenda-me-route-'
         . bin2hex(
             random_bytes(8)
         );
@@ -374,7 +463,8 @@ $tests[
         $now = 1_000_000;
 
         $context =
-            buildLogoutRouteTestContext(
+            buildMeRouteTestContext(
+                $pdo,
                 $sessionPath,
                 $now
             );
@@ -382,53 +472,56 @@ $tests[
         $response =
             $context['router']->handle(
                 Request::create(
-                    'POST',
-                    '/auth/logout'
+                    'GET',
+                    '/auth/me'
                 )
             );
 
-        assertLogoutRouteSame(
-            403,
+        assertMeRouteSame(
+            401,
             $response->statusCode(),
-            'Logout sem CSRF não retornou 403.'
+            'Sessão anônima não retornou HTTP 401.'
         );
 
-        assertLogoutRouteSame(
-            'csrf_invalid',
-            $response
-                ->payload()['error']['code']
-                ?? null,
-            'Código de erro CSRF está incorreto.'
+        assertMeRouteSame(
+            [
+                'error' =>
+                    'Autenticação necessária',
+            ],
+            $response->payload(),
+            'Resposta anônima de /auth/me está incorreta.'
         );
 
-        assertLogoutRouteSame(
-            0,
+        assertMeRouteSame(
+            1,
             $context[
                 'handler_calls'
             ]->count(),
-            'Handler de logout foi executado sem CSRF.'
+            'Handler de /auth/me não executou exatamente uma vez.'
         );
 
-        assertLogoutRouteSame(
+        assertMeRouteSame(
             PHP_SESSION_NONE,
             session_status(),
-            'Sessão permaneceu aberta após bloqueio CSRF.'
+            'Sessão permaneceu aberta após /auth/me.'
         );
     } finally {
-        resetLogoutRouteNativeSession();
+        resetMeRouteNativeSession();
 
-        removeLogoutRouteSessionDirectory(
+        removeMeRouteSessionDirectory(
             $sessionPath
         );
     }
 };
 
 $tests[
-    'encerra sessão autenticada com csrf válido'
-] = static function (): void {
+    'retorna usuário autenticado ativo sem wrapper'
+] = static function () use (
+    $pdo
+): void {
     $sessionPath =
         sys_get_temp_dir()
-        . '/agenda-logout-route-'
+        . '/agenda-me-route-'
         . bin2hex(
             random_bytes(8)
         );
@@ -449,50 +542,29 @@ $tests[
         $now = 2_000_000;
 
         $context =
-            buildLogoutRouteTestContext(
+            buildMeRouteTestContext(
+                $pdo,
                 $sessionPath,
                 $now
             );
 
-        $csrfResponse =
-            $context['router']->handle(
-                Request::create(
-                    'GET',
-                    '/auth/csrf'
-                )
+        $fixture =
+            createMeRouteFixture(
+                $pdo,
+                'me_route_active_test'
             );
-
-        $anonymousToken =
-            $csrfResponse
-                ->payload()['csrf_token']
-                ?? null;
-
-        assertLogoutRouteTrue(
-            is_string(
-                $anonymousToken
-            ),
-            'Rota CSRF não retornou token.'
-        );
 
         $context['session']->start();
 
-        $now = 2_000_123;
-
-        $authenticatedToken =
-            $context[
-                'authenticated_session'
-            ]->establish(
-                [
-                    'id' => 42,
-                    'username' =>
-                        'logout_route_test',
-                ]
-            );
-
-        assertLogoutRouteTrue(
-            $anonymousToken
-            !== $authenticatedToken,
-            'Login simulado não rotacionou o CSRF.'
+        $context[
+            'authenticated_session'
+        ]->establish(
+            [
+                'id' =>
+                    $fixture['id'],
+                'username' =>
+                    'username_antigo_da_sessao',
+            ]
         );
 
         $context['session']->close();
@@ -500,77 +572,81 @@ $tests[
         $response =
             $context['router']->handle(
                 Request::create(
-                    'POST',
-                    '/auth/logout',
-                    [
-                        'X-CSRF-Token' =>
-                            $authenticatedToken,
-                    ]
+                    'GET',
+                    '/auth/me'
                 )
             );
 
-        assertLogoutRouteSame(
+        assertMeRouteSame(
             200,
             $response->statusCode(),
-            'Logout autenticado não retornou 200.'
+            'Usuário autenticado não retornou HTTP 200.'
         );
 
-        assertLogoutRouteSame(
-            'Logout realizado',
-            $response
-                ->payload()['data']['message']
-                ?? null,
-            'Mensagem de logout está incorreta.'
+        assertMeRouteSame(
+            [
+                'id' =>
+                    $fixture['id'],
+                'username' =>
+                    $fixture['username'],
+            ],
+            $response->payload(),
+            'Resposta autenticada de /auth/me não preservou o contrato direto.'
         );
 
-        assertLogoutRouteSame(
+        assertMeRouteSame(
             1,
             $context[
                 'handler_calls'
             ]->count(),
-            'Handler de logout não executou exatamente uma vez.'
+            'Handler de /auth/me não executou exatamente uma vez.'
         );
 
-        assertLogoutRouteSame(
+        assertMeRouteSame(
             PHP_SESSION_NONE,
             session_status(),
-            'Sessão permaneceu ativa após logout.'
+            'Sessão permaneceu aberta após /auth/me.'
         );
 
         $context['session']->start();
 
-        assertLogoutRouteSame(
-            null,
+        $auth =
             $context['session']->get(
                 'auth'
+            );
+
+        assertMeRouteTrue(
+            is_array(
+                $auth
             ),
-            'Identidade autenticada permaneceu após logout.'
+            'A sessão autenticada não permaneceu persistida.'
         );
 
-        assertLogoutRouteSame(
-            false,
-            $context['csrf']->validate(
-                $authenticatedToken
-            ),
-            'CSRF autenticado anterior permaneceu válido.'
+        assertMeRouteSame(
+            $fixture['id'],
+            $auth['user_id']
+                ?? null,
+            'A identidade persistida foi alterada indevidamente.'
         );
 
         $context['session']->destroy();
     } finally {
-        resetLogoutRouteNativeSession();
+        resetMeRouteNativeSession();
 
-        removeLogoutRouteSessionDirectory(
+        removeMeRouteSessionDirectory(
             $sessionPath
         );
     }
 };
 
 $tests[
-    'permite logout anônimo com csrf válido'
-] = static function (): void {
+    'invalida sessão quando usuário está indisponível'
+] = static function () use (
+    $pdo
+): void {
     $sessionPath =
         sys_get_temp_dir()
-        . '/agenda-logout-route-'
+        . '/agenda-me-route-'
         . bin2hex(
             random_bytes(8)
         );
@@ -591,86 +667,78 @@ $tests[
         $now = 3_000_000;
 
         $context =
-            buildLogoutRouteTestContext(
+            buildMeRouteTestContext(
+                $pdo,
                 $sessionPath,
                 $now
             );
 
-        $csrfResponse =
-            $context['router']->handle(
-                Request::create(
-                    'GET',
-                    '/auth/csrf'
-                )
+        $fixture =
+            createMeRouteFixture(
+                $pdo,
+                'me_route_inactive_test',
+                0
             );
 
-        $token =
-            $csrfResponse
-                ->payload()['csrf_token']
-                ?? null;
+        $context['session']->start();
 
-        assertLogoutRouteTrue(
-            is_string(
-                $token
-            ),
-            'Sessão anônima não recebeu CSRF.'
+        $context[
+            'authenticated_session'
+        ]->establish(
+            [
+                'id' =>
+                    $fixture['id'],
+                'username' =>
+                    $fixture['username'],
+            ]
         );
+
+        $context['session']->close();
 
         $response =
             $context['router']->handle(
                 Request::create(
-                    'POST',
-                    '/auth/logout',
-                    [
-                        'X-CSRF-Token' =>
-                            $token,
-                    ]
+                    'GET',
+                    '/auth/me'
                 )
             );
 
-        assertLogoutRouteSame(
-            200,
+        assertMeRouteSame(
+            401,
             $response->statusCode(),
-            'Logout anônimo com CSRF válido não retornou 200.'
+            'Usuário indisponível não retornou HTTP 401.'
         );
 
-        assertLogoutRouteSame(
-            'Logout realizado',
-            $response
-                ->payload()['data']['message']
-                ?? null,
-            'Resposta do logout anônimo está incorreta.'
+        assertMeRouteSame(
+            [
+                'error' =>
+                    'Autenticação necessária',
+            ],
+            $response->payload(),
+            'Usuário indisponível expôs motivo diferente de autenticação.'
         );
 
-        assertLogoutRouteSame(
-            1,
-            $context[
-                'handler_calls'
-            ]->count(),
-            'Handler não executou no logout anônimo válido.'
-        );
-
-        assertLogoutRouteSame(
+        assertMeRouteSame(
             PHP_SESSION_NONE,
             session_status(),
-            'Sessão anônima permaneceu ativa após logout.'
+            'Sessão destruída deixou o mecanismo nativo ativo.'
         );
 
         $context['session']->start();
 
-        assertLogoutRouteSame(
-            false,
-            $context['csrf']->validate(
-                $token
+        assertMeRouteSame(
+            null,
+            $context['session']->get(
+                'auth'
             ),
-            'CSRF anônimo anterior permaneceu válido após logout.'
+            'Identidade indisponível permaneceu persistida.'
         );
 
         $context['session']->destroy();
     } finally {
-        resetLogoutRouteNativeSession();
+        resetMeRouteNativeSession();
 
-        removeLogoutRouteSessionDirectory(
+        removeMeRouteSessionDirectory(
             $sessionPath
         );
     }
@@ -682,18 +750,28 @@ $total = count(
     $tests
 );
 
-foreach ($tests as $name => $test) {
-    $result =
-        runLogoutRouteTest(
-            $name,
-            $test
-        );
+$pdo->beginTransaction();
 
-    $results[] =
-        $result['output'];
+try {
+    foreach (
+        $tests as $name => $test
+    ) {
+        $result =
+            runMeRouteTest(
+                $name,
+                $test
+            );
 
-    if ($result['passed']) {
-        ++$passed;
+        $results[] =
+            $result['output'];
+
+        if ($result['passed']) {
+            ++$passed;
+        }
+    }
+} finally {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
     }
 }
 
@@ -706,7 +784,7 @@ foreach ($results as $result) {
 
 fwrite(
     STDOUT,
-    "\nLogout route: "
+    "\nMe route: "
     . "{$passed}/{$total} teste(s) aprovado(s).\n"
 );
 

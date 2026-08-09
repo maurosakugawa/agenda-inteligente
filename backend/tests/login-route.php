@@ -294,12 +294,27 @@ function buildLoginRouteTestContext(
             }
         );
 
+    $meHandler =
+        static function (
+            Request $request
+        ): JsonResponse {
+            return new JsonResponse(
+                [
+                    'id' => 1,
+                    'username' =>
+                        'me_route_nao_utilizado',
+                ],
+                200
+            );
+        };
+
     /**
      * @var callable(
      *     HealthController,
      *     CsrfController,
      *     SessionMiddleware,
      *     CsrfMiddleware,
+     *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse
@@ -317,7 +332,8 @@ function buildLoginRouteTestContext(
             $csrfMiddleware,
             $registerHandler,
             $loginHandler,
-            $logoutHandler
+            $logoutHandler,
+            $meHandler
         );
 
     return [

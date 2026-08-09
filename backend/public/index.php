@@ -5,9 +5,11 @@ declare(strict_types=1);
 use AgendaInteligente\Application\Auth\CredentialValidator;
 use AgendaInteligente\Application\Auth\CredentialVerifier;
 use AgendaInteligente\Application\Auth\CsrfController;
+use AgendaInteligente\Application\Auth\CurrentUserResolver;
 use AgendaInteligente\Application\Auth\LoginController;
 use AgendaInteligente\Application\Auth\LoginRateLimiter;
 use AgendaInteligente\Application\Auth\LogoutController;
+use AgendaInteligente\Application\Auth\MeController;
 use AgendaInteligente\Application\Auth\RegisterController;
 use AgendaInteligente\Application\Auth\UserRegistrar;
 use AgendaInteligente\Application\Health\HealthController;
@@ -236,11 +238,50 @@ try {
     };
 
     /**
+     * @var callable(Request): JsonResponse $meHandler
+     */
+    $meHandler = static function (
+        Request $request
+    ) use (
+        $databaseConfig,
+        $authenticatedSession
+    ): JsonResponse {
+        static $meController = null;
+
+        if (
+            !$meController instanceof MeController
+        ) {
+            $pdo = Connection::make(
+                $databaseConfig
+            );
+
+            $repository =
+                new UserRepository(
+                    $pdo
+                );
+
+            $currentUser =
+                new CurrentUserResolver(
+                    $authenticatedSession,
+                    $repository
+                );
+
+            $meController =
+                new MeController(
+                    $currentUser
+                );
+        }
+
+        return $meController->handle();
+    };
+
+    /**
      * @var callable(
      *     HealthController,
      *     CsrfController,
      *     SessionMiddleware,
      *     CsrfMiddleware,
+     *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse,
      *     callable(Request): JsonResponse
@@ -257,7 +298,8 @@ try {
             $csrfMiddleware,
             $registerHandler,
             $loginHandler,
-            $logoutHandler
+            $logoutHandler,
+            $meHandler
         )
     );
 

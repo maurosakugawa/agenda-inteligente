@@ -1149,12 +1149,24 @@ $tests['registra as duas rotas de health'] = static function (): void {
             200
         );
 
+        $meHandler = static fn (
+            Request $request
+        ): JsonResponse => new JsonResponse(
+            [
+                'id' => 1,
+                'username' =>
+                    'me_http_nao_utilizado',
+            ],
+            200
+        );
+
         /**
          * @var callable(
          *     HealthController,
          *     CsrfController,
          *     SessionMiddleware,
          *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse
@@ -1170,7 +1182,8 @@ $tests['registra as duas rotas de health'] = static function (): void {
             $csrfMiddleware,
             $registerHandler,
             $loginHandler,
-            $logoutHandler
+            $logoutHandler,
+            $meHandler
         );
 
         foreach (
@@ -1287,6 +1300,17 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
             200
         );
 
+        $meHandler = static fn (
+            Request $request
+        ): JsonResponse => new JsonResponse(
+            [
+                'id' => 1,
+                'username' =>
+                    'me_http_nao_utilizado',
+            ],
+            200
+        );
+
         $healthController = new HealthController(
             static function (): void {
             }
@@ -1298,6 +1322,7 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
          *     CsrfController,
          *     SessionMiddleware,
          *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse,
          *     callable(Request): JsonResponse
@@ -1313,7 +1338,8 @@ $tests['rota csrf cria sessão anônima e persiste token'] = static function ():
             $csrfMiddleware,
             $registerHandler,
             $loginHandler,
-            $logoutHandler
+            $logoutHandler,
+            $meHandler
         );
 
         assertHttpSame(

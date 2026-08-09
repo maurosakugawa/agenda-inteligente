@@ -17,7 +17,8 @@ return static function (
     CsrfMiddleware $csrfMiddleware,
     callable $registerHandler,
     callable $loginHandler,
-    callable $logoutHandler
+    callable $logoutHandler,
+    callable $meHandler
 ): Router {
     $router = new Router();
 
@@ -48,6 +49,14 @@ return static function (
         ): JsonResponse {
             return $csrfController->handle();
         },
+        [
+            $sessionMiddleware,
+        ]
+    );
+
+    $router->get(
+        '/auth/me',
+        $meHandler,
         [
             $sessionMiddleware,
         ]
