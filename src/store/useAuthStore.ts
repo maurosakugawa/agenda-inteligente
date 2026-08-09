@@ -1,6 +1,10 @@
 import { create } from "zustand";
 
-import { apiUrl } from "../config/api";
+import { apiFetch } from "../services/http/apiClient";
+import {
+  clearCsrfToken,
+  refreshCsrfToken,
+} from "../services/http/csrf";
 
 
 interface User {
@@ -44,10 +48,8 @@ export const useAuthStore =
       set({ loading: true });
 
       try {
-        const response = await fetch(
-          apiUrl("/auth/me"),
-          { credentials: "include" }
-        );
+        const response =
+          await apiFetch("/auth/me");
 
         if (response.ok) {
           const user =
@@ -55,9 +57,23 @@ export const useAuthStore =
 
           set({ user });
         } else {
+          /**
+           * Se a sessão deixou de ser autenticada,
+           * qualquer token CSRF associado à sessão
+           * anterior não deve continuar no cache.
+           */
+          if (response.status === 401) {
+            clearCsrfToken();
+          }
+
           set({ user: null });
         }
       } catch {
+        /**
+         * Uma falha de rede não significa
+         * necessariamente que a sessão expirou.
+         * Por isso não invalidamos o CSRF aqui.
+         */
         set({ user: null });
       } finally {
         set({
@@ -74,20 +90,21 @@ export const useAuthStore =
       });
 
       try {
-        const response = await fetch(
-          apiUrl("/auth/login"),
-          {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              username,
-              password,
-            }),
-          }
-        );
+        const response =
+          await apiFetch(
+            "/auth/login",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                username,
+                password,
+              }),
+            }
+          );
 
         const data =
           await response.json() as {
@@ -99,6 +116,27 @@ export const useAuthStore =
           throw new Error(
             data.error || "Login falhou."
           );
+        }
+
+        /**
+         * O backend regenera a sessão após
+         * autenticação bem-sucedida.
+         *
+         * O token usado no POST /auth/login
+         * pertence à sessão anterior e deve ser
+         * substituído pelo token da nova sessão.
+         *
+         * Se a renovação imediata falhar por um
+         * problema transitório de rede, o login já
+         * ocorreu no servidor. Mantemos a sessão
+         * autenticada e deixamos o cache vazio para
+         * que a próxima mutação tente obter outro
+         * token automaticamente.
+         */
+        try {
+          await refreshCsrfToken();
+        } catch {
+          clearCsrfToken();
         }
 
         set({
@@ -124,20 +162,21 @@ export const useAuthStore =
       });
 
       try {
-        const response = await fetch(
-          apiUrl("/auth/register"),
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              username,
-              password,
-            }),
-          }
-        );
+        const response =
+          await apiFetch(
+            "/auth/register",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                username,
+                password,
+              }),
+            }
+          );
 
         const data =
           await response.json() as {
@@ -167,14 +206,25 @@ export const useAuthStore =
 
     logout: async () => {
       try {
-        await fetch(
-          apiUrl("/auth/logout"),
+        /**
+         * O CSRF precisa continuar disponível até
+         * o POST terminar, pois logout também é uma
+         * operação mutável protegida.
+         */
+        await apiFetch(
+          "/auth/logout",
           {
             method: "POST",
-            credentials: "include",
           }
         );
       } finally {
+        /**
+         * Depois da tentativa de encerramento da
+         * sessão, nenhum token da identidade
+         * anterior permanece no frontend.
+         */
+        clearCsrfToken();
+
         set({
           user: null,
           initialized: true,
