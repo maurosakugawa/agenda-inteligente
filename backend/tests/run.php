@@ -35,6 +35,23 @@ function validConfig(): array
             'idle_timeout' => 1800,
             'absolute_timeout' => 28800,
         ],
+        'login_rate_limit' => [
+            'key_secret' =>
+                'segredo-de-rate-limit-para-testes-com-32-bytes',
+
+            'ip' => [
+                'max_attempts' => 20,
+                'window_seconds' => 300,
+                'block_seconds' => 900,
+            ],
+
+            'username_ip' => [
+                'max_failures' => 5,
+                'window_seconds' => 900,
+                'block_seconds' => 900,
+            ],
+        ],
+
         'weather' => [
             'api_key' => '',
             'base_url' => 'https://api.openweathermap.org',
@@ -169,6 +186,46 @@ $tests = [];
 $tests['aceita configuração válida'] = static function (): void {
     ConfigValidator::validate(
         validConfig()
+    );
+};
+
+$tests['rejeita segredo curto do rate limiter'] = static function (): void {
+    $config = validConfig();
+    $config['login_rate_limit']['key_secret'] = 'curto';
+
+    assertConfigurationException(
+        static fn (): mixed => ConfigValidator::validate($config),
+        'login_rate_limit.key_secret deve possuir pelo menos 32 bytes'
+    );
+};
+
+$tests['rejeita configuração de IP que não é seção'] = static function (): void {
+    $config = validConfig();
+    $config['login_rate_limit']['ip'] = 'inválido';
+
+    assertConfigurationException(
+        static fn (): mixed => ConfigValidator::validate($config),
+        'login_rate_limit.ip deve ser uma seção'
+    );
+};
+
+$tests['rejeita limite de tentativas por IP não positivo'] = static function (): void {
+    $config = validConfig();
+    $config['login_rate_limit']['ip']['max_attempts'] = 0;
+
+    assertConfigurationException(
+        static fn (): mixed => ConfigValidator::validate($config),
+        'login_rate_limit.ip.max_attempts deve ser maior que zero'
+    );
+};
+
+$tests['rejeita limite de falhas por username e IP não positivo'] = static function (): void {
+    $config = validConfig();
+    $config['login_rate_limit']['username_ip']['max_failures'] = 0;
+
+    assertConfigurationException(
+        static fn (): mixed => ConfigValidator::validate($config),
+        'login_rate_limit.username_ip.max_failures deve ser maior que zero'
     );
 };
 

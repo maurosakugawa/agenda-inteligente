@@ -1,11 +1,41 @@
 import { create } from "zustand";
 
-import { apiUrl } from "../config/api";
+import { apiFetch } from "../services/http/apiClient";
+import {
+  clearCsrfToken,
+  refreshCsrfToken,
+} from "../services/http/csrf";
 
 
 interface User {
   id: number;
   username: string;
+}
+
+interface ApiError {
+  code?: unknown;
+  message?: unknown;
+}
+
+interface ApiResponse {
+  success?: unknown;
+  error?: ApiError | string;
+  message?: unknown;
+}
+
+interface LoginResponse extends ApiResponse {
+  data?: {
+    message?: unknown;
+    user?: User;
+    csrf_token?: unknown;
+  };
+}
+
+interface RegisterResponse extends ApiResponse {
+  data?: {
+    message?: unknown;
+    userId?: unknown;
+  };
 }
 
 interface AuthStore {
@@ -33,6 +63,40 @@ function getErrorMessage(error: unknown): string {
     : "Não foi possível concluir a operação.";
 }
 
+function getApiErrorMessage(
+  payload: ApiResponse | null,
+  fallback: string
+): string {
+  if (payload === null) {
+    return fallback;
+  }
+
+  if (
+    typeof payload.error === "string" &&
+    payload.error.trim()
+  ) {
+    return payload.error;
+  }
+
+  if (
+    payload.error &&
+    typeof payload.error === "object" &&
+    typeof payload.error.message === "string" &&
+    payload.error.message.trim()
+  ) {
+    return payload.error.message;
+  }
+
+  if (
+    typeof payload.message === "string" &&
+    payload.message.trim()
+  ) {
+    return payload.message;
+  }
+
+  return fallback;
+}
+
 export const useAuthStore =
   create<AuthStore>((set) => ({
     user: null,
@@ -44,17 +108,28 @@ export const useAuthStore =
       set({ loading: true });
 
       try {
-        const response = await fetch(
-          apiUrl("/auth/me"),
-          { credentials: "include" }
-        );
+        const response =
+          await apiFetch("/auth/me");
 
         if (response.ok) {
+          /**
+           * /auth/me preserva intencionalmente
+           * o contrato sem envelope:
+           *
+           * {
+           *   "id": 1,
+           *   "username": "usuario"
+           * }
+           */
           const user =
             await response.json() as User;
 
           set({ user });
         } else {
+          if (response.status === 401) {
+            clearCsrfToken();
+          }
+
           set({ user: null });
         }
       } catch {
@@ -74,35 +149,60 @@ export const useAuthStore =
       });
 
       try {
-        const response = await fetch(
-          apiUrl("/auth/login"),
-          {
-            method: "POST",
-            credentials: "include",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              username,
-              password,
-            }),
-          }
-        );
+        const response =
+          await apiFetch(
+            "/auth/login",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                username,
+                password,
+              }),
+            }
+          );
 
-        const data =
-          await response.json() as {
-            error?: string;
-            user?: User;
-          };
+        const payload =
+          await response
+            .json()
+            .catch(() => null) as
+              | LoginResponse
+              | null;
 
-        if (!response.ok || !data.user) {
+        const user =
+          payload?.data?.user;
+
+        if (!response.ok || !user) {
           throw new Error(
-            data.error || "Login falhou."
+            getApiErrorMessage(
+              payload,
+              "Login falhou."
+            )
           );
         }
 
+        /**
+         * O backend regenera a sessão durante
+         * o login. O token usado para autenticar
+         * pertence à sessão anterior.
+         */
+        try {
+          await refreshCsrfToken();
+        } catch {
+          /**
+           * O login já ocorreu no servidor.
+           * Mantemos o usuário autenticado e
+           * deixamos a próxima mutação obter
+           * novamente um token.
+           */
+          clearCsrfToken();
+        }
+
         set({
-          user: data.user,
+          user,
           loading: false,
           initialized: true,
         });
@@ -124,29 +224,35 @@ export const useAuthStore =
       });
 
       try {
-        const response = await fetch(
-          apiUrl("/auth/register"),
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              username,
-              password,
-            }),
-          }
-        );
+        const response =
+          await apiFetch(
+            "/auth/register",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              body: JSON.stringify({
+                username,
+                password,
+              }),
+            }
+          );
 
-        const data =
-          await response.json() as {
-            error?: string;
-          };
+        const payload =
+          await response
+            .json()
+            .catch(() => null) as
+              | RegisterResponse
+              | null;
 
         if (!response.ok) {
           throw new Error(
-            data.error || "Registro falhou."
+            getApiErrorMessage(
+              payload,
+              "Registro falhou."
+            )
           );
         }
 
@@ -167,14 +273,15 @@ export const useAuthStore =
 
     logout: async () => {
       try {
-        await fetch(
-          apiUrl("/auth/logout"),
+        await apiFetch(
+          "/auth/logout",
           {
             method: "POST",
-            credentials: "include",
           }
         );
       } finally {
+        clearCsrfToken();
+
         set({
           user: null,
           initialized: true,

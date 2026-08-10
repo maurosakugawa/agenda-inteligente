@@ -221,6 +221,75 @@ final class ConfigValidator
             );
         }
 
+        $loginRateLimit = self::section(
+            $config,
+            'login_rate_limit'
+        );
+
+        $keySecret = self::string(
+            $loginRateLimit,
+            'key_secret',
+            'login_rate_limit.key_secret'
+        );
+
+        if (
+            strlen($keySecret)
+            < 32
+        ) {
+            self::invalid(
+                'login_rate_limit.key_secret',
+                'deve possuir pelo menos 32 bytes.'
+            );
+        }
+
+        $ipRateLimit = self::section(
+            $loginRateLimit,
+            'ip',
+            'login_rate_limit.ip'
+        );
+
+        self::positiveInteger(
+            $ipRateLimit,
+            'max_attempts',
+            'login_rate_limit.ip.max_attempts'
+        );
+
+        self::positiveInteger(
+            $ipRateLimit,
+            'window_seconds',
+            'login_rate_limit.ip.window_seconds'
+        );
+
+        self::positiveInteger(
+            $ipRateLimit,
+            'block_seconds',
+            'login_rate_limit.ip.block_seconds'
+        );
+
+        $usernameIpRateLimit = self::section(
+            $loginRateLimit,
+            'username_ip',
+            'login_rate_limit.username_ip'
+        );
+
+        self::positiveInteger(
+            $usernameIpRateLimit,
+            'max_failures',
+            'login_rate_limit.username_ip.max_failures'
+        );
+
+        self::positiveInteger(
+            $usernameIpRateLimit,
+            'window_seconds',
+            'login_rate_limit.username_ip.window_seconds'
+        );
+
+        self::positiveInteger(
+            $usernameIpRateLimit,
+            'block_seconds',
+            'login_rate_limit.username_ip.block_seconds'
+        );
+
         $weather = self::section(
             $config,
             'weather'
@@ -283,11 +352,14 @@ final class ConfigValidator
      */
     private static function section(
         array $config,
-        string $key
+        string $key,
+        ?string $path = null
     ): array {
+        $path ??= $key;
+
         if (!array_key_exists($key, $config)) {
             self::invalid(
-                $key,
+                $path,
                 'está ausente.'
             );
         }
@@ -296,7 +368,7 @@ final class ConfigValidator
 
         if (!is_array($value)) {
             self::invalid(
-                $key,
+                $path,
                 'deve ser uma seção.'
             );
         }

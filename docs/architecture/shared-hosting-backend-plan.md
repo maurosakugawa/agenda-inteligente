@@ -1228,7 +1228,7 @@ Antes da implementação deverão ser decididos:
 7. código `400` ou `422` para validação semântica;
 8. tabela de associação evento-contato;
 9. estratégia de cache meteorológico;
-10. mecanismo de migrations;
+10. mecanismo de migrations — resolvido pelo ADR 0007;
 11. estratégia de rate limiting;
 12. topologia de produção;
 13. comportamento inicial da sincronização;

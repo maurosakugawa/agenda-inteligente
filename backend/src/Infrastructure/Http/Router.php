@@ -96,18 +96,31 @@ final class Router implements RequestHandlerInterface
                 continue;
             }
 
-            return $route->dispatch(
-                $request->withRouteParams(
-                    $routeParameters
-                )
-            );
+            try {
+                return $route->dispatch(
+                    $request->withRouteParams(
+                        $routeParameters
+                    )
+                );
+            } catch (
+                InvalidJsonBodyException
+            ) {
+                return JsonResponse::error(
+                    'invalid_json_body',
+                    'O corpo da requisição deve conter um objeto JSON válido.',
+                    400
+                );
+            }
         }
 
         if ($allowedMethods !== []) {
             $allowedMethods = array_values(
                 array_unique($allowedMethods)
             );
-            sort($allowedMethods);
+
+            sort(
+                $allowedMethods
+            );
 
             return JsonResponse::error(
                 'method_not_allowed',

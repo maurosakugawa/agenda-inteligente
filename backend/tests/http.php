@@ -2,13 +2,19 @@
 
 declare(strict_types=1);
 
+use AgendaInteligente\Application\Auth\CsrfController;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Application\HttpKernel;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Middleware\CsrfMiddleware;
+use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\MiddlewareInterface;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\RequestHandlerInterface;
 use AgendaInteligente\Infrastructure\Http\Router;
+use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
+use AgendaInteligente\Infrastructure\Session\SessionManager;
+
 
 require_once dirname(__DIR__) . '/autoload.php';
 
@@ -77,6 +83,50 @@ function assertHttpSame(
     }
 }
 
+function resetHttpNativeSession(): void
+{
+    if (
+        session_status()
+        === PHP_SESSION_ACTIVE
+    ) {
+        $_SESSION = [];
+        session_destroy();
+    }
+
+    if (
+        session_status()
+        === PHP_SESSION_NONE
+    ) {
+        session_id('');
+    }
+
+    $_SESSION = [];
+}
+
+function removeHttpSessionDirectory(
+    string $sessionPath
+): void {
+    if (!is_dir($sessionPath)) {
+        return;
+    }
+
+    $sessionFiles = glob(
+        $sessionPath . '/*'
+    );
+
+    if (is_array($sessionFiles)) {
+        foreach ($sessionFiles as $file) {
+            if (is_file($file)) {
+                unlink($file);
+            }
+        }
+    }
+
+    rmdir(
+        $sessionPath
+    );
+}
+
 $temporaryLog = sys_get_temp_dir()
     . '/agenda-http-tests-'
     . bin2hex(random_bytes(8))
@@ -128,6 +178,455 @@ $tests['usa valores padrão para requisição vazia'] = static function (): void
         '/',
         $request->path(),
         'O caminho padrão está incorreto.'
+    );
+
+    assertHttpSame(
+        null,
+        $request->remoteAddress(),
+        'O endereço remoto padrão deveria ser null.'
+    );
+};
+
+$tests[
+    'adiciona atributo sem modificar requisição original'
+] = static function (): void {
+    $request = Request::create(
+        'GET',
+        '/teste'
+    );
+
+    $enriched =
+        $request->withAttribute(
+            'authenticated_user_id',
+            42
+        );
+
+    assertHttpSame(
+        null,
+        $request->attribute(
+            'authenticated_user_id'
+        ),
+        'A requisição original foi modificada.'
+    );
+
+    assertHttpSame(
+        42,
+        $enriched->attribute(
+            'authenticated_user_id'
+        ),
+        'O atributo não foi adicionado à nova requisição.'
+    );
+
+    assertHttpSame(
+        'fallback',
+        $enriched->attribute(
+            'inexistente',
+            'fallback'
+        ),
+        'O valor padrão de atributo não foi respeitado.'
+    );
+};
+
+$tests['armazena endereço remoto informado na criação'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [],
+        '',
+        '203.0.113.10'
+    );
+
+    assertHttpSame(
+        '203.0.113.10',
+        $request->remoteAddress(),
+        'O endereço remoto informado na criação não foi preservado.'
+    );
+};
+
+$tests['normaliza e consulta headers sem diferenciar maiúsculas'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'X-CSRF-Token' => '  token-teste  ',
+            'Accept' => 'application/json',
+        ]
+    );
+
+    assertHttpSame(
+        'token-teste',
+        $request->header(
+            'X-CSRF-Token'
+        ),
+        'O header CSRF não foi retornado.'
+    );
+
+    assertHttpSame(
+        'token-teste',
+        $request->header(
+            'x-csrf-token'
+        ),
+        'A consulta de header não é case-insensitive.'
+    );
+
+    assertHttpSame(
+        'application/json',
+        $request->header(
+            'ACCEPT'
+        ),
+        'O header Accept não foi normalizado.'
+    );
+
+    assertHttpSame(
+        [
+            'x-csrf-token' => 'token-teste',
+            'accept' => 'application/json',
+        ],
+        $request->headers(),
+        'Os headers normalizados estão incorretos.'
+    );
+
+    assertHttpSame(
+        null,
+        $request->header(
+            'X-Inexistente'
+        ),
+        'Um header inexistente retornou valor.'
+    );
+
+    assertHttpSame(
+        null,
+        $request->header(''),
+        'Um nome de header vazio foi aceito.'
+    );
+};
+
+$tests['captura headers a partir dos globals'] = static function (): void {
+    $originalServer = $_SERVER;
+
+    try {
+        $_SERVER = [
+            'REQUEST_METHOD' => 'post',
+            'REQUEST_URI' => '/api/teste?origem=globals',
+            'HTTP_X_CSRF_TOKEN' => 'csrf-global',
+            'HTTP_ACCEPT' => 'application/json',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.99',
+            'CONTENT_TYPE' => 'application/json; charset=utf-8',
+            'CONTENT_LENGTH' => '42',
+            'REMOTE_ADDR' => '198.51.100.20',
+        ];
+
+        $request =
+            Request::fromGlobals();
+
+        assertHttpSame(
+            'POST',
+            $request->method(),
+            'O método vindo dos globals está incorreto.'
+        );
+
+        assertHttpSame(
+            '/api/teste',
+            $request->path(),
+            'O caminho vindo dos globals está incorreto.'
+        );
+
+        assertHttpSame(
+            '198.51.100.20',
+            $request->remoteAddress(),
+            'REMOTE_ADDR não foi preservado como origem da requisição.'
+        );
+
+        assertHttpSame(
+            '203.0.113.99',
+            $request->header(
+                'X-Forwarded-For'
+            ),
+            'X-Forwarded-For deveria continuar disponível apenas como header.'
+        );
+
+        assertHttpSame(
+            'csrf-global',
+            $request->header(
+                'X-CSRF-Token'
+            ),
+            'HTTP_X_CSRF_TOKEN não foi convertido corretamente.'
+        );
+
+        assertHttpSame(
+            'application/json',
+            $request->header(
+                'Accept'
+            ),
+            'HTTP_ACCEPT não foi convertido corretamente.'
+        );
+
+        assertHttpSame(
+            'application/json; charset=utf-8',
+            $request->header(
+                'Content-Type'
+            ),
+            'CONTENT_TYPE não foi convertido corretamente.'
+        );
+
+        assertHttpSame(
+            '42',
+            $request->header(
+                'Content-Length'
+            ),
+            'CONTENT_LENGTH não foi convertido corretamente.'
+        );
+    } finally {
+        $_SERVER = $originalServer;
+    }
+};
+
+$tests['usa null quando REMOTE_ADDR está ausente'] = static function (): void {
+    $originalServer = $_SERVER;
+
+    try {
+        $_SERVER = [
+            'REQUEST_METHOD' => 'GET',
+            'REQUEST_URI' => '/teste',
+            'HTTP_X_FORWARDED_FOR' => '203.0.113.200',
+        ];
+
+        $request =
+            Request::fromGlobals();
+
+        assertHttpSame(
+            null,
+            $request->remoteAddress(),
+            'REMOTE_ADDR ausente deveria resultar em null.'
+        );
+
+        assertHttpSame(
+            '203.0.113.200',
+            $request->header(
+                'X-Forwarded-For'
+            ),
+            'O header encaminhado não deveria ser descartado.'
+        );
+    } finally {
+        $_SERVER = $originalServer;
+    }
+};
+
+$tests['armazena corpo bruto da requisição'] = static function (): void {
+    $body = <<<'JSON'
+{"username":"mauro","password":"senha-teste"}
+JSON;
+
+    $request = Request::create(
+        'POST',
+        '/auth/login',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        $body
+    );
+
+    assertHttpSame(
+        $body,
+        $request->body(),
+        'O corpo bruto da requisição foi alterado.'
+    );
+};
+
+$tests['decodifica objeto JSON da requisição'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/auth/login',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        <<<'JSON'
+{
+    "username": "mauro",
+    "password": "senha-teste",
+    "metadata": {
+        "origin": "web"
+    }
+}
+JSON
+    );
+
+    assertHttpSame(
+        [
+            'username' => 'mauro',
+            'password' => 'senha-teste',
+            'metadata' => [
+                'origin' => 'web',
+            ],
+        ],
+        $request->json(),
+        'O corpo JSON não foi decodificado corretamente.'
+    );
+};
+
+$tests['aceita objeto JSON vazio'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '{}'
+    );
+
+    assertHttpSame(
+        [],
+        $request->json(),
+        'Um objeto JSON vazio não foi aceito.'
+    );
+};
+
+$tests['rejeita corpo JSON vazio'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        ''
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um corpo JSON vazio foi aceito.'
+    );
+};
+
+$tests['rejeita JSON malformado'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '{"username":"mauro"'
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um JSON malformado foi aceito.'
+    );
+};
+
+$tests['rejeita array como raiz JSON'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '["mauro","teste"]'
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um array JSON foi aceito como objeto de requisição.'
+    );
+};
+
+$tests['rejeita valor escalar como raiz JSON'] = static function (): void {
+    $request = Request::create(
+        'POST',
+        '/teste',
+        [
+            'Content-Type' => 'application/json',
+        ],
+        '"mauro"'
+    );
+
+    try {
+        $request->json();
+    } catch (
+        \AgendaInteligente\Infrastructure\Http\InvalidJsonBodyException
+    ) {
+        return;
+    }
+
+    throw new RuntimeException(
+        'Um valor JSON escalar foi aceito como objeto de requisição.'
+    );
+};
+
+$tests['roteador converte JSON inválido em erro HTTP 400'] = static function (): void {
+    $handlerExecutions = new ArrayObject();
+
+    $router = new Router();
+
+    $router->add(
+        'POST',
+        '/auth/teste-json',
+        static function (
+            Request $request
+        ) use (
+            $handlerExecutions
+        ): JsonResponse {
+            $handlerExecutions->append(
+                true
+            );
+
+            $input = $request->json();
+
+            return JsonResponse::success(
+                [
+                    'input' => $input,
+                ]
+            );
+        }
+    );
+
+    $response = $router->handle(
+        Request::create(
+            'POST',
+            '/auth/teste-json',
+            [
+                'Content-Type' => 'application/json',
+            ],
+            '{"username":'
+        )
+    );
+
+    assertHttpSame(
+        400,
+        $response->statusCode(),
+        'JSON inválido não retornou HTTP 400.'
+    );
+
+    assertHttpSame(
+        'invalid_json_body',
+        $response->payload()['error']['code'] ?? null,
+        'O código do erro de JSON inválido está incorreto.'
+    );
+
+    assertHttpSame(
+        1,
+        $handlerExecutions->count(),
+        'O handler não chegou até a tentativa de interpretar o JSON.'
     );
 };
 
@@ -476,6 +975,70 @@ $tests['executa middlewares em ordem determinística'] = static function (): voi
     );
 };
 
+$tests[
+    'propaga request enriquecido pelo pipeline'
+] = static function (): void {
+    $middleware =
+        new class implements MiddlewareInterface {
+            public function process(
+                Request $request,
+                RequestHandlerInterface $next
+            ): JsonResponse {
+                return $next->handle(
+                    $request->withAttribute(
+                        'authenticated_user_id',
+                        42
+                    )
+                );
+            }
+        };
+
+    $router = new Router();
+
+    $router->get(
+        '/contexto',
+        static function (
+            Request $request
+        ): JsonResponse {
+            return JsonResponse::success(
+                [
+                    'authenticated_user_id' =>
+                        $request->attribute(
+                            'authenticated_user_id'
+                        ),
+                ]
+            );
+        },
+        [
+            $middleware,
+        ]
+    );
+
+    $response =
+        $router->handle(
+            Request::create(
+                'GET',
+                '/contexto'
+            )
+        );
+
+    assertHttpSame(
+        200,
+        $response->statusCode(),
+        'O pipeline alterou o status da resposta.'
+    );
+
+    assertHttpSame(
+        42,
+        $response->payload()[
+            'data'
+        ][
+            'authenticated_user_id'
+        ] ?? null,
+        'O Request enriquecido não chegou ao handler.'
+    );
+};
+
 $tests['middleware pode interromper o pipeline'] = static function (): void {
     $handlerExecutions = new ArrayObject();
 
@@ -612,38 +1175,396 @@ $tests['kernel delega para o roteador'] = static function (): void {
 };
 
 $tests['registra as duas rotas de health'] = static function (): void {
+    resetHttpNativeSession();
+
     $healthController = new HealthController(
         static function (): void {
         }
     );
 
-    /** @var callable(HealthController): Router $routeFactory */
-    $routeFactory = require dirname(__DIR__)
-        . '/routes/http.php';
-    $router = $routeFactory(
-        $healthController
-    );
+    $sessionPath = sys_get_temp_dir()
+        . '/agenda-http-route-session-'
+        . bin2hex(random_bytes(8));
 
-    foreach (
-        [
-            '/health',
-            '/api/health',
-        ] as $path
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
     ) {
+        throw new RuntimeException(
+            'Não foi possível criar o diretório temporário de sessões.'
+        );
+    }
+
+    try {
+        $sessionManager = new SessionManager(
+            [
+                'name' => 'AGENDA_HTTP_ROUTE_TEST',
+                'secure' => false,
+                'same_site' => 'Lax',
+                'idle_timeout' => 1800,
+                'absolute_timeout' => 28800,
+            ],
+            $sessionPath
+        );
+
+        $csrfTokenManager = new CsrfTokenManager(
+            $sessionManager
+        );
+
+        $csrfController = new CsrfController(
+            $csrfTokenManager
+        );
+
+        $sessionMiddleware = new SessionMiddleware(
+            $sessionManager
+        );
+
+        $csrfMiddleware = new CsrfMiddleware(
+            $csrfTokenManager
+        );
+
+        $registerHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'registered' => true,
+            ],
+            201
+        );
+
+        $loginHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_in' => true,
+            ],
+            200
+        );
+
+        $logoutHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_out' => true,
+            ],
+            200
+        );
+
+        $meHandler = static fn (
+            Request $request
+        ): JsonResponse => new JsonResponse(
+            [
+                'id' => 1,
+                'username' =>
+                    'me_http_nao_utilizado',
+            ],
+            200
+        );
+
+        /**
+         * @var callable(
+         *     HealthController,
+         *     CsrfController,
+         *     SessionMiddleware,
+         *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
+         *     callable(Request): JsonResponse,
+         *     callable(Request): JsonResponse,
+         *     callable(Request): JsonResponse
+         * ): Router $routeFactory
+         */
+        $routeFactory = require dirname(__DIR__)
+            . '/routes/http.php';
+
+        $router = $routeFactory(
+            $healthController,
+            $csrfController,
+            $sessionMiddleware,
+            $csrfMiddleware,
+            $registerHandler,
+            $loginHandler,
+            $logoutHandler,
+            $meHandler
+        );
+
+        foreach (
+            [
+                '/health',
+                '/api/health',
+            ] as $path
+        ) {
+            $response = $router->handle(
+                Request::create(
+                    'GET',
+                    $path
+                )
+            );
+
+            assertHttpSame(
+                200,
+                $response->statusCode(),
+                sprintf(
+                    'A rota %s não retornou 200.',
+                    $path
+                )
+            );
+
+            assertHttpSame(
+                PHP_SESSION_NONE,
+                session_status(),
+                sprintf(
+                    'A rota %s iniciou sessão indevidamente.',
+                    $path
+                )
+            );
+        }
+    } finally {
+        resetHttpNativeSession();
+
+        removeHttpSessionDirectory(
+            $sessionPath
+        );
+    }
+};
+
+$tests['rota csrf cria sessão anônima e persiste token'] = static function (): void {
+    resetHttpNativeSession();
+
+    $sessionPath = sys_get_temp_dir()
+        . '/agenda-http-csrf-session-'
+        . bin2hex(random_bytes(8));
+
+    if (
+        !mkdir(
+            $sessionPath,
+            0700,
+            true
+        )
+    ) {
+        throw new RuntimeException(
+            'Não foi possível criar o diretório temporário de sessões.'
+        );
+    }
+
+    try {
+        $sessionManager = new SessionManager(
+            [
+                'name' => 'AGENDA_HTTP_CSRF_TEST',
+                'secure' => false,
+                'same_site' => 'Lax',
+                'idle_timeout' => 1800,
+                'absolute_timeout' => 28800,
+            ],
+            $sessionPath
+        );
+
+        $csrfTokenManager = new CsrfTokenManager(
+            $sessionManager
+        );
+
+        $csrfController = new CsrfController(
+            $csrfTokenManager
+        );
+
+        $sessionMiddleware = new SessionMiddleware(
+            $sessionManager
+        );
+
+        $csrfMiddleware = new CsrfMiddleware(
+            $csrfTokenManager
+        );
+
+        $registerHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'registered' => true,
+            ],
+            201
+        );
+
+        $loginHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_in' => true,
+            ],
+            200
+        );
+
+        $logoutHandler = static fn (
+            Request $request
+        ): JsonResponse => JsonResponse::success(
+            [
+                'logged_out' => true,
+            ],
+            200
+        );
+
+        $meHandler = static fn (
+            Request $request
+        ): JsonResponse => new JsonResponse(
+            [
+                'id' => 1,
+                'username' =>
+                    'me_http_nao_utilizado',
+            ],
+            200
+        );
+
+        $healthController = new HealthController(
+            static function (): void {
+            }
+        );
+
+        /**
+         * @var callable(
+         *     HealthController,
+         *     CsrfController,
+         *     SessionMiddleware,
+         *     CsrfMiddleware,
+         *     callable(Request): JsonResponse,
+         *     callable(Request): JsonResponse,
+         *     callable(Request): JsonResponse,
+         *     callable(Request): JsonResponse
+         * ): Router $routeFactory
+         */
+        $routeFactory = require dirname(__DIR__)
+            . '/routes/http.php';
+
+        $router = $routeFactory(
+            $healthController,
+            $csrfController,
+            $sessionMiddleware,
+            $csrfMiddleware,
+            $registerHandler,
+            $loginHandler,
+            $logoutHandler,
+            $meHandler
+        );
+
+        assertHttpSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'Uma sessão já estava ativa antes da requisição CSRF.'
+        );
+
         $response = $router->handle(
             Request::create(
                 'GET',
-                $path
+                '/auth/csrf'
             )
         );
 
         assertHttpSame(
             200,
             $response->statusCode(),
-            sprintf(
-                'A rota %s não retornou 200.',
-                $path
+            'A rota CSRF não retornou 200.'
+        );
+
+        assertHttpSame(
+            'no-store',
+            $response->headers()['Cache-Control'] ?? null,
+            'A rota CSRF não desabilitou cache.'
+        );
+
+        $token = $response->payload()['csrf_token']
+            ?? null;
+
+        assertHttpTrue(
+            is_string($token),
+            'A rota CSRF não retornou um token.'
+        );
+
+        assertHttpSame(
+            64,
+            strlen($token),
+            'O token CSRF não possui 64 caracteres.'
+        );
+
+        assertHttpTrue(
+            ctype_xdigit($token),
+            'O token CSRF não está em formato hexadecimal.'
+        );
+
+        assertHttpSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'A sessão permaneceu aberta após a requisição.'
+        );
+
+        $sessionId = session_id();
+
+        assertHttpTrue(
+            $sessionId !== '',
+            'Nenhum identificador de sessão foi criado.'
+        );
+
+        $sessionManager->start();
+
+        $security = $sessionManager->get(
+            'security'
+        );
+
+        assertHttpTrue(
+            is_array($security),
+            'O estado de segurança da sessão não está disponível.'
+        );
+
+        assertHttpSame(
+            $token,
+            $security['csrf_token'] ?? null,
+            'O token retornado não foi persistido na sessão.'
+        );
+
+        assertHttpSame(
+            null,
+            $sessionManager->get(
+                'auth'
+            ),
+            'A sessão CSRF anônima contém dados de autenticação.'
+        );
+
+        $sessionManager->close();
+
+        $secondResponse = $router->handle(
+            Request::create(
+                'GET',
+                '/auth/csrf'
             )
+        );
+
+        assertHttpSame(
+            200,
+            $secondResponse->statusCode(),
+            'A segunda requisição CSRF não retornou 200.'
+        );
+
+        assertHttpSame(
+            $token,
+            $secondResponse->payload()['csrf_token'] ?? null,
+            'Uma segunda requisição da mesma sessão trocou o token CSRF.'
+        );
+
+        assertHttpSame(
+            $sessionId,
+            session_id(),
+            'A segunda requisição alterou a sessão sem necessidade.'
+        );
+
+        assertHttpSame(
+            PHP_SESSION_NONE,
+            session_status(),
+            'A sessão permaneceu aberta após a segunda requisição.'
+        );
+    } finally {
+        resetHttpNativeSession();
+
+        removeHttpSessionDirectory(
+            $sessionPath
         );
     }
 };

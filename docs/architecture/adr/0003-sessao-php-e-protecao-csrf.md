@@ -442,7 +442,10 @@ A resposta não deverá diferenciar:
 
 - usuário inexistente;
 - senha incorreta;
-- usuário desativado, quando essa distinção facilitar enumeração.
+- usuário desabilitado (`active = 0`);
+- usuário excluído logicamente (`deleted_at IS NOT NULL`).
+
+Essas condições deverão utilizar uma resposta genérica de credenciais inválidas, evitando enumeração de usuários e exposição do estado da conta.
 
 ## Registro
 
@@ -500,6 +503,92 @@ Não deverão ser utilizados:
 - criptografia reversível;
 - hash manual sem salt apropriado;
 - senha em texto puro.
+
+## Política de credenciais
+
+A validação das credenciais será diferente entre registro e login para
+preservar compatibilidade com usuários existentes e impedir que novas
+restrições de criação de credenciais invalidem contas já cadastradas.
+
+### Nome de usuário
+
+No registro, o nome de usuário deverá:
+
+- ser obrigatório;
+- possuir entre 3 e 100 caracteres Unicode;
+- possuir UTF-8 válido;
+- não possuir caracteres de controle;
+- não possuir espaços no início ou no fim;
+- permitir espaços internos;
+- permitir letras Unicode, números e pontuação.
+
+No login, o nome de usuário deverá:
+
+- ser obrigatório;
+- possuir no máximo 100 caracteres Unicode;
+- possuir UTF-8 válido;
+- não possuir caracteres de controle.
+
+O backend não deverá aplicar `trim()` silenciosamente ao nome de usuário.
+Valores com espaços indevidos deverão ser rejeitados pela validação, em vez
+de modificados antes da autenticação ou persistência.
+
+### Senha
+
+No registro, a senha deverá:
+
+- ser obrigatória;
+- possuir no mínimo 15 caracteres;
+- possuir no máximo 72 bytes;
+- permitir espaços;
+- permitir caracteres Unicode;
+- permitir letras, números e símbolos sem regras obrigatórias de composição.
+
+Não será obrigatório combinar artificialmente:
+
+- letras maiúsculas;
+- letras minúsculas;
+- números;
+- caracteres especiais.
+
+No login, a senha deverá:
+
+- ser obrigatória;
+- possuir no máximo 72 bytes;
+- não possuir comprimento mínimo além de não ser vazia.
+
+A diferença entre registro e login preserva a compatibilidade com usuários
+existentes que possam possuir senhas criadas antes desta política.
+
+A senha nunca deverá ser truncada silenciosamente.
+
+O limite máximo de 72 bytes acompanha o limite do algoritmo atualmente
+utilizado por `PASSWORD_DEFAULT` no PHP alvo. Como `PASSWORD_DEFAULT`
+pode mudar em versões futuras do PHP, esse limite deverá ser reavaliado
+quando o algoritmo padrão mudar.
+
+### Ordem da validação
+
+Os limites e formatos definidos nesta seção deverão ser validados antes do
+acesso ao repository.
+
+No registro, o fluxo será:
+
+    entrada
+      -> validação para registro
+      -> password_hash
+      -> repository
+
+No login, o fluxo será:
+
+    entrada
+      -> validação para login
+      -> localização do usuário
+      -> password_verify
+
+As regras de força aplicadas à criação de novas senhas não deverão impedir
+a autenticação de credenciais legadas válidas.
+
 
 ## Logout
 
@@ -587,6 +676,17 @@ com status:
 ```
 
 `GET /auth/me` não deverá criar implicitamente uma sessão autenticada.
+
+Uma sessão autenticada somente permanecerá válida enquanto o usuário correspondente existir e estiver disponível.
+
+O usuário será considerado indisponível quando:
+
+- estiver com `active = 0`;
+- estiver com `deleted_at IS NOT NULL`.
+
+Caso a sessão aponte para um usuário inexistente ou indisponível, `/auth/me` deverá invalidar a sessão atual e retornar `401 Unauthorized`.
+
+A definição do ciclo de vida do usuário e da política de exclusão lógica permanece centralizada no ADR 0004.
 
 ## Tempo de expiração
 
@@ -970,17 +1070,40 @@ A política definitiva para dados locais de múltiplos usuários deverá ser def
 
 Login e registro deverão possuir limitação de requisições.
 
-A limitação poderá considerar:
+Para o login, a política utilizará dois escopos complementares:
 
-- endereço IP;
-- nome de usuário normalizado;
-- janela de tempo;
-- quantidade de falhas;
-- bloqueio temporário.
+- limite geral por endereço IP, destinado a restringir volume excessivo
+  de tentativas;
+- limite de falhas pela combinação entre nome de usuário e endereço IP,
+  destinado a restringir tentativas repetidas contra uma mesma identidade
+  sem criar bloqueio global baseado apenas no nome de usuário.
 
-A limitação não deverá depender exclusivamente da sessão, pois um atacante pode descartar cookies.
+O estado do rate limiting deverá ser compartilhado entre requisições e
+não poderá depender exclusivamente da sessão, pois um atacante pode
+descartar cookies.
 
-Os detalhes serão definidos na implementação de segurança e rate limiting.
+A primeira implementação persistirá esse estado no banco de dados
+relacional MySQL utilizado pela aplicação.
+
+A camada de aplicação deverá permanecer desacoplada do mecanismo
+concreto de persistência, permitindo substituição futura sem alterar
+o fluxo de autenticação.
+
+Quantidade máxima de tentativas, duração das janelas e período de
+bloqueio serão parâmetros operacionais configuráveis. Esses valores
+poderão ser ajustados sem alteração do algoritmo, da persistência ou
+do contrato HTTP.
+
+O bloqueio deverá ser temporário.
+
+Falhas de CSRF e entradas estruturalmente inválidas não deverão ser
+contabilizadas como falhas de credenciais do login.
+
+A política de limitação não poderá revelar se o nome de usuário
+informado corresponde a uma conta existente.
+
+Quando uma tentativa for impedida pela política de rate limiting, a
+resposta deverá utilizar `429 Too Many Requests`.
 
 ## Logs de segurança
 
