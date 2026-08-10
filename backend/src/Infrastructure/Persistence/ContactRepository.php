@@ -68,6 +68,64 @@ final class ContactRepository
     }
 
     /**
+     * Busca um contato pertencente ao usuário informado.
+     *
+     * @return array{
+     *     id:int,
+     *     user_id:int,
+     *     name:string,
+     *     phone:?string,
+     *     email:?string,
+     *     cep:?string,
+     *     logradouro:?string,
+     *     numero:?string,
+     *     bairro:?string,
+     *     cidade:?string,
+     *     uf:?string,
+     *     created_at:string,
+     *     updated_at:string
+     * }|null
+     */
+    public function findByIdAndUserId(
+        int $id,
+        int $userId
+    ): ?array {
+        $statement = $this->pdo->prepare(
+            "
+            SELECT
+                id,
+                user_id,
+                name,
+                phone,
+                email,
+                cep,
+                logradouro,
+                numero,
+                bairro,
+                cidade,
+                uf,
+                created_at,
+                updated_at
+            FROM contacts
+            WHERE id = :id
+              AND user_id = :user_id
+            LIMIT 1
+            "
+        );
+
+        $statement->execute([
+            ':id' => $id,
+            ':user_id' => $userId,
+        ]);
+
+        $contact = $statement->fetch();
+
+        return is_array($contact)
+            ? $contact
+            : null;
+    }
+
+    /**
      * Cria um contato pertencente ao usuário informado
      * e retorna seu identificador.
      */

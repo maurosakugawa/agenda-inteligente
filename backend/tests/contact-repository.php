@@ -666,6 +666,145 @@ $tests[
     );
 };
 
+
+$tests[
+    'busca contato por id e usuário'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_find_{$suffix}"
+        );
+
+    $contactId =
+        createContactRepositoryFixture(
+            $pdo,
+            $userId,
+            'Contato Localizado',
+            '2026-08-09 12:00:00'
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contact =
+        $repository->findByIdAndUserId(
+            $contactId,
+            $userId
+        );
+
+    assertContactRepositoryTrue(
+        is_array($contact),
+        'Contato existente não foi encontrado.'
+    );
+
+    assertContactRepositorySame(
+        $contactId,
+        $contact['id'] ?? null,
+        'Repository retornou identificador incorreto.'
+    );
+
+    assertContactRepositorySame(
+        $userId,
+        $contact['user_id'] ?? null,
+        'Repository retornou usuário incorreto.'
+    );
+
+    assertContactRepositorySame(
+        'Contato Localizado',
+        $contact['name'] ?? null,
+        'Repository retornou contato incorreto.'
+    );
+};
+
+$tests[
+    'retorna null para id de contato inexistente'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_missing_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contact =
+        $repository->findByIdAndUserId(
+            PHP_INT_MAX,
+            $userId
+        );
+
+    assertContactRepositorySame(
+        null,
+        $contact,
+        'Contato inexistente deveria retornar null.'
+    );
+};
+
+$tests[
+    'não retorna contato pertencente a outro usuário'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $ownerId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_owner_{$suffix}"
+        );
+
+    $otherUserId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_other_{$suffix}"
+        );
+
+    $contactId =
+        createContactRepositoryFixture(
+            $pdo,
+            $ownerId,
+            'Contato Privado',
+            '2026-08-09 13:00:00'
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contact =
+        $repository->findByIdAndUserId(
+            $contactId,
+            $otherUserId
+        );
+
+    assertContactRepositorySame(
+        null,
+        $contact,
+        'Contato de outro usuário não deveria ser acessível.'
+    );
+};
+
 $passed = 0;
 $total = count($tests);
 
