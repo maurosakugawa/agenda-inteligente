@@ -1,36 +1,127 @@
-import { apiUrl } from "../../../config/api";
+import { apiFetch } from "../../../services/http/apiClient";
 
-import type { Contact, ContactInput } from '../types/contact.types';
+import type {
+  Contact,
+  ContactInput,
+} from "../types/contact.types";
 
 
-async function fetchWithAuth(url: string, options: RequestInit = {}) {
-  const res = await fetch(apiUrl(url), {
-    ...options,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
+interface ContactApiError {
+  error?: unknown;
+}
 
-  if (res.status === 401) {
-    throw new Error('Não autenticado');
+function getErrorMessage(
+  payload: ContactApiError | null
+): string {
+  if (
+    typeof payload?.error === "string" &&
+    payload.error.trim()
+  ) {
+    return payload.error;
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || 'Erro na requisição');
+  if (
+    payload?.error &&
+    typeof payload.error === "object" &&
+    "message" in payload.error
+  ) {
+    const message =
+      (payload.error as { message?: unknown })
+        .message;
+
+    if (
+      typeof message === "string" &&
+      message.trim()
+    ) {
+      return message;
+    }
   }
 
-  return res.json();
+  return "Erro na requisição";
+}
+
+async function request<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const response =
+    await apiFetch(
+      path,
+      options
+    );
+
+  if (response.status === 401) {
+    throw new Error(
+      "Não autenticado"
+    );
+  }
+
+  if (!response.ok) {
+    const payload =
+      await response
+        .json()
+        .catch(() => null) as
+          | ContactApiError
+          | null;
+
+    throw new Error(
+      getErrorMessage(
+        payload
+      )
+    );
+  }
+
+  return response.json() as Promise<T>;
 }
 
 export const contactService = {
-  list: (): Promise<Contact[]> => fetchWithAuth('/api/contacts'),
-  create: (data: ContactInput): Promise<Contact> =>
-    fetchWithAuth('/api/contacts', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: ContactInput): Promise<Contact> =>
-    fetchWithAuth(`/api/contacts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (id: number): Promise<{ message: string }> =>
-    fetchWithAuth(`/api/contacts/${id}`, { method: 'DELETE' }),
+  list: (): Promise<Contact[]> =>
+    request<Contact[]>(
+      "/api/contacts"
+    ),
+
+  create: (
+    data: ContactInput
+  ): Promise<Contact> =>
+    request<Contact>(
+      "/api/contacts",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify(
+          data
+        ),
+      }
+    ),
+
+  update: (
+    id: number,
+    data: ContactInput
+  ): Promise<Contact> =>
+    request<Contact>(
+      `/api/contacts/${id}`,
+      {
+        method: "PUT",
+        headers: {
+          "Content-Type":
+            "application/json",
+        },
+        body: JSON.stringify(
+          data
+        ),
+      }
+    ),
+
+  delete: (
+    id: number
+  ): Promise<{ message: string }> =>
+    request<{ message: string }>(
+      `/api/contacts/${id}`,
+      {
+        method: "DELETE",
+      }
+    ),
 };
