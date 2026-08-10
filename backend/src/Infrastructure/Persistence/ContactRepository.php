@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AgendaInteligente\Infrastructure\Persistence;
 
 use PDO;
+use RuntimeException;
 
 final class ContactRepository
 {
@@ -65,4 +66,74 @@ final class ContactRepository
             ? $contacts
             : [];
     }
+
+    /**
+     * Cria um contato pertencente ao usuário informado
+     * e retorna seu identificador.
+     */
+    public function create(
+        int $userId,
+        string $name,
+        ?string $phone = null,
+        ?string $email = null,
+        ?string $cep = null,
+        ?string $logradouro = null,
+        ?string $numero = null,
+        ?string $bairro = null,
+        ?string $cidade = null,
+        ?string $uf = null
+    ): int {
+        $statement = $this->pdo->prepare(
+            "
+            INSERT INTO contacts (
+                user_id,
+                name,
+                phone,
+                email,
+                cep,
+                logradouro,
+                numero,
+                bairro,
+                cidade,
+                uf
+            )
+            VALUES (
+                :user_id,
+                :name,
+                :phone,
+                :email,
+                :cep,
+                :logradouro,
+                :numero,
+                :bairro,
+                :cidade,
+                :uf
+            )
+            "
+        );
+
+        $statement->execute([
+            ':user_id' => $userId,
+            ':name' => $name,
+            ':phone' => $phone,
+            ':email' => $email,
+            ':cep' => $cep,
+            ':logradouro' => $logradouro,
+            ':numero' => $numero,
+            ':bairro' => $bairro,
+            ':cidade' => $cidade,
+            ':uf' => $uf,
+        ]);
+
+        $id = (int) $this->pdo->lastInsertId();
+
+        if ($id <= 0) {
+            throw new RuntimeException(
+                'Não foi possível obter o identificador do contato criado.'
+            );
+        }
+
+        return $id;
+    }
+
 }

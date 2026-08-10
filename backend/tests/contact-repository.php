@@ -388,6 +388,284 @@ $tests[
     );
 };
 
+
+$tests[
+    'cria contato e retorna identificador'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_create_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $userId,
+            'Maria da Silva',
+            '(12) 99999-1234',
+            'maria@example.test',
+            '12210-000',
+            'Rua das Flores',
+            '250',
+            'Centro',
+            'São José dos Campos',
+            'SP'
+        );
+
+    assertContactRepositoryTrue(
+        $contactId > 0,
+        'Repository não retornou identificador válido.'
+    );
+
+    $statement = $pdo->prepare(
+        "
+        SELECT
+            id,
+            user_id,
+            name,
+            phone,
+            email,
+            cep,
+            logradouro,
+            numero,
+            bairro,
+            cidade,
+            uf
+        FROM contacts
+        WHERE id = :id
+        LIMIT 1
+        "
+    );
+
+    $statement->execute([
+        ':id' => $contactId,
+    ]);
+
+    $contact = $statement->fetch();
+
+    assertContactRepositoryTrue(
+        is_array($contact),
+        'Contato criado não foi encontrado no banco.'
+    );
+
+    assertContactRepositorySame(
+        $userId,
+        $contact['user_id'] ?? null,
+        'Contato foi associado ao usuário incorreto.'
+    );
+
+    assertContactRepositorySame(
+        'Maria da Silva',
+        $contact['name'] ?? null,
+        'Nome não foi preservado.'
+    );
+
+    assertContactRepositorySame(
+        '(12) 99999-1234',
+        $contact['phone'] ?? null,
+        'Telefone não foi preservado.'
+    );
+
+    assertContactRepositorySame(
+        'maria@example.test',
+        $contact['email'] ?? null,
+        'E-mail não foi preservado.'
+    );
+
+    assertContactRepositorySame(
+        '12210-000',
+        $contact['cep'] ?? null,
+        'CEP não foi preservado.'
+    );
+
+    assertContactRepositorySame(
+        'Rua das Flores',
+        $contact['logradouro'] ?? null,
+        'Logradouro não foi preservado.'
+    );
+
+    assertContactRepositorySame(
+        '250',
+        $contact['numero'] ?? null,
+        'Número não foi preservado.'
+    );
+
+    assertContactRepositorySame(
+        'Centro',
+        $contact['bairro'] ?? null,
+        'Bairro não foi preservado.'
+    );
+
+    assertContactRepositorySame(
+        'São José dos Campos',
+        $contact['cidade'] ?? null,
+        'Cidade não foi preservada.'
+    );
+
+    assertContactRepositorySame(
+        'SP',
+        $contact['uf'] ?? null,
+        'UF não foi preservada.'
+    );
+};
+
+$tests[
+    'aceita campos opcionais nulos'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_nullable_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $userId,
+            'Contato Mínimo'
+        );
+
+    $statement = $pdo->prepare(
+        "
+        SELECT
+            name,
+            phone,
+            email,
+            cep,
+            logradouro,
+            numero,
+            bairro,
+            cidade,
+            uf
+        FROM contacts
+        WHERE id = :id
+        LIMIT 1
+        "
+    );
+
+    $statement->execute([
+        ':id' => $contactId,
+    ]);
+
+    $contact = $statement->fetch();
+
+    assertContactRepositoryTrue(
+        is_array($contact),
+        'Contato mínimo não foi encontrado.'
+    );
+
+    assertContactRepositorySame(
+        'Contato Mínimo',
+        $contact['name'] ?? null,
+        'Nome obrigatório não foi preservado.'
+    );
+
+    foreach (
+        [
+            'phone',
+            'email',
+            'cep',
+            'logradouro',
+            'numero',
+            'bairro',
+            'cidade',
+            'uf',
+        ] as $field
+    ) {
+        assertContactRepositorySame(
+            null,
+            $contact[$field] ?? null,
+            "Campo opcional {$field} deveria permanecer NULL."
+        );
+    }
+};
+
+$tests[
+    'preenche timestamps ao criar contato'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_timestamp_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $userId,
+            'Contato Timestamp'
+        );
+
+    $statement = $pdo->prepare(
+        "
+        SELECT
+            created_at,
+            updated_at
+        FROM contacts
+        WHERE id = :id
+        LIMIT 1
+        "
+    );
+
+    $statement->execute([
+        ':id' => $contactId,
+    ]);
+
+    $contact = $statement->fetch();
+
+    assertContactRepositoryTrue(
+        is_array($contact),
+        'Contato para teste de timestamps não foi encontrado.'
+    );
+
+    assertContactRepositoryTrue(
+        is_string(
+            $contact['created_at'] ?? null
+        )
+        && $contact['created_at'] !== '',
+        'created_at não foi preenchido.'
+    );
+
+    assertContactRepositoryTrue(
+        is_string(
+            $contact['updated_at'] ?? null
+        )
+        && $contact['updated_at'] !== '',
+        'updated_at não foi preenchido.'
+    );
+};
+
 $passed = 0;
 $total = count($tests);
 
