@@ -1080,6 +1080,273 @@ $tests[
     );
 };
 
+
+$tests[
+    'remove contato pertencente ao usuário'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_delete_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $userId,
+            'Contato para Exclusão'
+        );
+
+    $deleted =
+        $repository->delete(
+            $contactId,
+            $userId
+        );
+
+    assertContactRepositorySame(
+        true,
+        $deleted,
+        'Exclusão de contato existente deveria retornar true.'
+    );
+
+    $contact =
+        $repository->findByIdAndUserId(
+            $contactId,
+            $userId
+        );
+
+    assertContactRepositorySame(
+        null,
+        $contact,
+        'Contato removido ainda foi encontrado.'
+    );
+};
+
+$tests[
+    'não remove contato pertencente a outro usuário'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $ownerId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_delete_owner_{$suffix}"
+        );
+
+    $otherUserId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_delete_other_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $ownerId,
+            'Contato Protegido contra Exclusão'
+        );
+
+    $deleted =
+        $repository->delete(
+            $contactId,
+            $otherUserId
+        );
+
+    assertContactRepositorySame(
+        false,
+        $deleted,
+        'Outro usuário não deveria conseguir remover o contato.'
+    );
+
+    $contact =
+        $repository->findByIdAndUserId(
+            $contactId,
+            $ownerId
+        );
+
+    assertContactRepositoryTrue(
+        is_array($contact),
+        'Contato do proprietário foi removido indevidamente.'
+    );
+};
+
+$tests[
+    'retorna false ao remover contato inexistente'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_delete_missing_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $deleted =
+        $repository->delete(
+            PHP_INT_MAX,
+            $userId
+        );
+
+    assertContactRepositorySame(
+        false,
+        $deleted,
+        'Exclusão de contato inexistente deveria retornar false.'
+    );
+};
+
+$tests[
+    'remove vínculo com evento ao excluir contato'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_delete_event_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $userId,
+            'Contato Vinculado'
+        );
+
+    $statement = $pdo->prepare(
+        "
+        INSERT INTO events (
+            user_id,
+            title,
+            event_date
+        )
+        VALUES (
+            :user_id,
+            :title,
+            :event_date
+        )
+        "
+    );
+
+    $statement->execute([
+        ':user_id' => $userId,
+        ':title' => 'Evento de Teste',
+        ':event_date' => '2026-08-10',
+    ]);
+
+    $eventId =
+        (int) $pdo->lastInsertId();
+
+    assertContactRepositoryTrue(
+        $eventId > 0,
+        'Evento fixture não recebeu identificador válido.'
+    );
+
+    $statement = $pdo->prepare(
+        "
+        INSERT INTO event_contacts (
+            event_id,
+            contact_id,
+            created_at
+        )
+        VALUES (
+            :event_id,
+            :contact_id,
+            UTC_TIMESTAMP()
+        )
+        "
+    );
+
+    $statement->execute([
+        ':event_id' => $eventId,
+        ':contact_id' => $contactId,
+    ]);
+
+    $deleted =
+        $repository->delete(
+            $contactId,
+            $userId
+        );
+
+    assertContactRepositorySame(
+        true,
+        $deleted,
+        'Contato vinculado deveria ter sido removido.'
+    );
+
+    $statement = $pdo->prepare(
+        "
+        SELECT COUNT(*)
+        FROM event_contacts
+        WHERE event_id = :event_id
+          AND contact_id = :contact_id
+        "
+    );
+
+    $statement->execute([
+        ':event_id' => $eventId,
+        ':contact_id' => $contactId,
+    ]);
+
+    assertContactRepositorySame(
+        0,
+        (int) $statement->fetchColumn(),
+        'Vínculo com evento deveria ser removido por cascade.'
+    );
+
+    $statement = $pdo->prepare(
+        "
+        SELECT COUNT(*)
+        FROM events
+        WHERE id = :id
+        "
+    );
+
+    $statement->execute([
+        ':id' => $eventId,
+    ]);
+
+    assertContactRepositorySame(
+        1,
+        (int) $statement->fetchColumn(),
+        'A exclusão do contato não deveria remover o evento.'
+    );
+};
+
 $passed = 0;
 $total = count($tests);
 

@@ -187,6 +187,32 @@ final class ContactRepository
     }
 
     /**
+     * Remove um contato pertencente ao usuário informado.
+     *
+     * Retorna false quando o contato não existe
+     * ou pertence a outro usuário.
+     */
+    public function delete(
+        int $id,
+        int $userId
+    ): bool {
+        $statement = $this->pdo->prepare(
+            "
+            DELETE FROM contacts
+            WHERE id = :id
+              AND user_id = :user_id
+            "
+        );
+
+        $statement->execute([
+            ':id' => $id,
+            ':user_id' => $userId,
+        ]);
+
+        return $statement->rowCount() === 1;
+    }
+
+    /**
      * Cria um contato pertencente ao usuário informado
      * e retorna seu identificador.
      */
