@@ -5,6 +5,7 @@ declare(strict_types=1);
 use AgendaInteligente\Application\Auth\CredentialValidator;
 use AgendaInteligente\Application\Auth\CredentialVerifier;
 use AgendaInteligente\Application\Auth\CsrfController;
+use AgendaInteligente\Application\Auth\CurrentUserProvider;
 use AgendaInteligente\Application\Auth\CurrentUserResolver;
 use AgendaInteligente\Application\Auth\LoginController;
 use AgendaInteligente\Application\Auth\LoginRateLimiter;
@@ -12,16 +13,24 @@ use AgendaInteligente\Application\Auth\LogoutController;
 use AgendaInteligente\Application\Auth\MeController;
 use AgendaInteligente\Application\Auth\RegisterController;
 use AgendaInteligente\Application\Auth\UserRegistrar;
+use AgendaInteligente\Application\Contacts\ContactController;
+use AgendaInteligente\Application\Contacts\ContactCreator;
+use AgendaInteligente\Application\Contacts\ContactDeleter;
+use AgendaInteligente\Application\Contacts\ContactLister;
+use AgendaInteligente\Application\Contacts\ContactUpdater;
+use AgendaInteligente\Application\Contacts\ContactValidator;
 use AgendaInteligente\Application\Health\HealthController;
 use AgendaInteligente\Application\HttpKernel;
 use AgendaInteligente\Infrastructure\Config\ConfigurationException;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Http\JsonResponse;
+use AgendaInteligente\Infrastructure\Http\Middleware\AuthenticationMiddleware;
 use AgendaInteligente\Infrastructure\Http\Middleware\CsrfMiddleware;
 use AgendaInteligente\Infrastructure\Http\Middleware\SessionMiddleware;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Http\Router;
 use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
+use AgendaInteligente\Infrastructure\Persistence\ContactRepository;
 use AgendaInteligente\Infrastructure\Persistence\MySqlRateLimitRepository;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
@@ -110,6 +119,68 @@ try {
         $sessionManager,
         $csrfTokenManager
     );
+
+    /**
+     * Conexão compartilhada apenas pelas rotas de Contatos.
+     *
+     * A PDO só é criada quando autenticação ou controller
+     * de Contatos realmente precisar do banco.
+     */
+    $contactDatabase =
+        static function () use (
+            $databaseConfig
+        ): PDO {
+            static $pdo = null;
+
+            if (!$pdo instanceof PDO) {
+                $pdo = Connection::make(
+                    $databaseConfig
+                );
+            }
+
+            return $pdo;
+        };
+
+    $contactCurrentUser =
+        new class(
+            $contactDatabase,
+            $authenticatedSession
+        ) implements CurrentUserProvider {
+            private ?CurrentUserResolver $resolver =
+                null;
+
+            public function __construct(
+                private \Closure $database,
+                private AuthenticatedSession $session
+            ) {
+            }
+
+            public function resolve(): ?array
+            {
+                if (
+                    !$this->resolver
+                    instanceof CurrentUserResolver
+                ) {
+                    $repository =
+                        new UserRepository(
+                            ($this->database)()
+                        );
+
+                    $this->resolver =
+                        new CurrentUserResolver(
+                            $this->session,
+                            $repository
+                        );
+                }
+
+                return $this->resolver->resolve();
+            }
+        };
+
+    $authenticationMiddleware =
+        new AuthenticationMiddleware(
+            $contactCurrentUser
+        );
 
     $healthController = new HealthController(
         static function () use (
@@ -276,6 +347,99 @@ try {
     };
 
     /**
+     * @var \Closure(): ContactController $contactControllerFactory
+     */
+    $contactControllerFactory =
+        static function () use (
+            $contactDatabase
+        ): ContactController {
+            static $contactController = null;
+
+            if (
+                !$contactController
+                instanceof ContactController
+            ) {
+                $repository =
+                    new ContactRepository(
+                        $contactDatabase()
+                    );
+
+                $validator =
+                    new ContactValidator();
+
+                $contactController =
+                    new ContactController(
+                        new ContactLister(
+                            $repository
+                        ),
+                        new ContactCreator(
+                            $repository,
+                            $validator
+                        ),
+                        new ContactUpdater(
+                            $repository,
+                            $validator
+                        ),
+                        new ContactDeleter(
+                            $repository
+                        )
+                    );
+            }
+
+            return $contactController;
+        };
+
+    $contactHandlers = [
+        'list' =>
+            static function (
+                Request $request
+            ) use (
+                $contactControllerFactory
+            ): JsonResponse {
+                return $contactControllerFactory()
+                    ->list(
+                        $request
+                    );
+            },
+
+        'create' =>
+            static function (
+                Request $request
+            ) use (
+                $contactControllerFactory
+            ): JsonResponse {
+                return $contactControllerFactory()
+                    ->create(
+                        $request
+                    );
+            },
+
+        'update' =>
+            static function (
+                Request $request
+            ) use (
+                $contactControllerFactory
+            ): JsonResponse {
+                return $contactControllerFactory()
+                    ->update(
+                        $request
+                    );
+            },
+
+        'delete' =>
+            static function (
+                Request $request
+            ) use (
+                $contactControllerFactory
+            ): JsonResponse {
+                return $contactControllerFactory()
+                    ->delete(
+                        $request
+                    );
+            },
+    ];
+
+    /**
      * @var callable(
      *     HealthController,
      *     CsrfController,
@@ -290,7 +454,7 @@ try {
     $routeFactory = require dirname(__DIR__)
         . '/routes/http.php';
 
-    $kernel = new HttpKernel(
+    $router =
         $routeFactory(
             $healthController,
             $csrfController,
@@ -300,8 +464,34 @@ try {
             $loginHandler,
             $logoutHandler,
             $meHandler
-        )
-    );
+        );
+
+    /**
+     * @var callable(
+     *     Router,
+     *     SessionMiddleware,
+     *     AuthenticationMiddleware,
+     *     CsrfMiddleware,
+     *     array<string, callable>
+     * ): Router $contactRouteRegistrar
+     */
+    $contactRouteRegistrar =
+        require dirname(__DIR__)
+            . '/routes/contacts.php';
+
+    $router =
+        $contactRouteRegistrar(
+            $router,
+            $sessionMiddleware,
+            $authenticationMiddleware,
+            $csrfMiddleware,
+            $contactHandlers
+        );
+
+    $kernel =
+        new HttpKernel(
+            $router
+        );
 
     $response = $kernel->handle(
         Request::fromGlobals()
