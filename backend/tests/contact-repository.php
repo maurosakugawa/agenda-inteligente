@@ -805,6 +805,281 @@ $tests[
     );
 };
 
+
+$tests[
+    'atualiza contato pertencente ao usuário'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_update_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $userId,
+            'Contato Original',
+            '(12) 90000-0000',
+            'original@example.test',
+            '12210-000',
+            'Rua Original',
+            '10',
+            'Bairro Original',
+            'São José dos Campos',
+            'SP'
+        );
+
+    $updated =
+        $repository->update(
+            $contactId,
+            $userId,
+            'Contato Atualizado',
+            '(12) 98888-7777',
+            'atualizado@example.test',
+            '12345-678',
+            'Rua Atualizada',
+            '200',
+            null,
+            'Jacareí',
+            'SP'
+        );
+
+    assertContactRepositorySame(
+        true,
+        $updated,
+        'Atualização de contato existente deveria retornar true.'
+    );
+
+    $contact =
+        $repository->findByIdAndUserId(
+            $contactId,
+            $userId
+        );
+
+    assertContactRepositoryTrue(
+        is_array($contact),
+        'Contato atualizado não foi encontrado.'
+    );
+
+    assertContactRepositorySame(
+        'Contato Atualizado',
+        $contact['name'] ?? null,
+        'Nome atualizado está incorreto.'
+    );
+
+    assertContactRepositorySame(
+        '(12) 98888-7777',
+        $contact['phone'] ?? null,
+        'Telefone atualizado está incorreto.'
+    );
+
+    assertContactRepositorySame(
+        'atualizado@example.test',
+        $contact['email'] ?? null,
+        'E-mail atualizado está incorreto.'
+    );
+
+    assertContactRepositorySame(
+        '12345-678',
+        $contact['cep'] ?? null,
+        'CEP atualizado está incorreto.'
+    );
+
+    assertContactRepositorySame(
+        'Rua Atualizada',
+        $contact['logradouro'] ?? null,
+        'Logradouro atualizado está incorreto.'
+    );
+
+    assertContactRepositorySame(
+        '200',
+        $contact['numero'] ?? null,
+        'Número atualizado está incorreto.'
+    );
+
+    assertContactRepositorySame(
+        null,
+        $contact['bairro'] ?? null,
+        'Bairro deveria ter sido limpo para NULL.'
+    );
+
+    assertContactRepositorySame(
+        'Jacareí',
+        $contact['cidade'] ?? null,
+        'Cidade atualizada está incorreta.'
+    );
+
+    assertContactRepositorySame(
+        'SP',
+        $contact['uf'] ?? null,
+        'UF atualizada está incorreta.'
+    );
+};
+
+$tests[
+    'considera sucesso quando dados atualizados são idênticos'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_same_update_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $userId,
+            'Contato Sem Alteração',
+            '(12) 97777-6666',
+            'igual@example.test',
+            '12210-000',
+            'Rua Igual',
+            '50',
+            'Centro',
+            'São José dos Campos',
+            'SP'
+        );
+
+    $updated =
+        $repository->update(
+            $contactId,
+            $userId,
+            'Contato Sem Alteração',
+            '(12) 97777-6666',
+            'igual@example.test',
+            '12210-000',
+            'Rua Igual',
+            '50',
+            'Centro',
+            'São José dos Campos',
+            'SP'
+        );
+
+    assertContactRepositorySame(
+        true,
+        $updated,
+        'Contato existente deveria ser considerado atualizado mesmo sem mudança de valores.'
+    );
+};
+
+$tests[
+    'não atualiza contato pertencente a outro usuário'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $ownerId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_update_owner_{$suffix}"
+        );
+
+    $otherUserId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_update_other_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $contactId =
+        $repository->create(
+            $ownerId,
+            'Contato Protegido'
+        );
+
+    $updated =
+        $repository->update(
+            $contactId,
+            $otherUserId,
+            'Tentativa Indevida'
+        );
+
+    assertContactRepositorySame(
+        false,
+        $updated,
+        'Outro usuário não deveria conseguir atualizar o contato.'
+    );
+
+    $contact =
+        $repository->findByIdAndUserId(
+            $contactId,
+            $ownerId
+        );
+
+    assertContactRepositoryTrue(
+        is_array($contact),
+        'Contato original não foi encontrado.'
+    );
+
+    assertContactRepositorySame(
+        'Contato Protegido',
+        $contact['name'] ?? null,
+        'Tentativa de outro usuário modificou o contato.'
+    );
+};
+
+$tests[
+    'retorna false ao atualizar contato inexistente'
+] = static function () use (
+    $pdo
+): void {
+    $suffix = bin2hex(
+        random_bytes(5)
+    );
+
+    $userId =
+        createContactRepositoryUserFixture(
+            $pdo,
+            "contact_repository_update_missing_{$suffix}"
+        );
+
+    $repository =
+        new ContactRepository(
+            $pdo
+        );
+
+    $updated =
+        $repository->update(
+            PHP_INT_MAX,
+            $userId,
+            'Contato Inexistente'
+        );
+
+    assertContactRepositorySame(
+        false,
+        $updated,
+        'Atualização de contato inexistente deveria retornar false.'
+    );
+};
+
 $passed = 0;
 $total = count($tests);
 

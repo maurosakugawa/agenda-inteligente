@@ -126,6 +126,67 @@ final class ContactRepository
     }
 
     /**
+     * Atualiza um contato pertencente ao usuário informado.
+     *
+     * Retorna false quando o contato não existe
+     * ou pertence a outro usuário.
+     */
+    public function update(
+        int $id,
+        int $userId,
+        string $name,
+        ?string $phone = null,
+        ?string $email = null,
+        ?string $cep = null,
+        ?string $logradouro = null,
+        ?string $numero = null,
+        ?string $bairro = null,
+        ?string $cidade = null,
+        ?string $uf = null
+    ): bool {
+        $statement = $this->pdo->prepare(
+            "
+            UPDATE contacts
+            SET
+                name = :name,
+                phone = :phone,
+                email = :email,
+                cep = :cep,
+                logradouro = :logradouro,
+                numero = :numero,
+                bairro = :bairro,
+                cidade = :cidade,
+                uf = :uf
+            WHERE id = :id
+              AND user_id = :user_id
+            "
+        );
+
+        $statement->execute([
+            ':id' => $id,
+            ':user_id' => $userId,
+            ':name' => $name,
+            ':phone' => $phone,
+            ':email' => $email,
+            ':cep' => $cep,
+            ':logradouro' => $logradouro,
+            ':numero' => $numero,
+            ':bairro' => $bairro,
+            ':cidade' => $cidade,
+            ':uf' => $uf,
+        ]);
+
+        if ($statement->rowCount() > 0) {
+            return true;
+        }
+
+        return $this->findByIdAndUserId(
+            $id,
+            $userId
+        ) !== null;
+    }
+
+    /**
      * Cria um contato pertencente ao usuário informado
      * e retorna seu identificador.
      */
