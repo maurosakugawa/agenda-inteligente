@@ -1,5 +1,8 @@
 import { apiUrl } from "../../config/api";
-import { getCsrfToken } from "./csrf";
+import {
+  clearCsrfToken,
+  getCsrfToken,
+} from "./csrf";
 
 const CSRF_PROTECTED_METHODS =
   new Set([
@@ -8,6 +11,12 @@ const CSRF_PROTECTED_METHODS =
     "PATCH",
     "DELETE",
   ]);
+
+interface ApiErrorResponse {
+  error?: {
+    code?: unknown;
+  };
+}
 
 function normalizeMethod(
   method?: string
@@ -36,44 +45,56 @@ export function isCsrfProtectedMethod(
 }
 
 /**
- * Cliente HTTP para endpoints internos da
- * Agenda Inteligente.
+ * Identifica exclusivamente a resposta usada pelo
+ * backend para sinalizar falha de validação CSRF.
  *
- * Responsabilidades transversais:
- *
- * - resolver a URL pelo apiUrl();
- * - sempre enviar cookies de sessão;
- * - anexar automaticamente X-CSRF-Token
- *   nas requisições mutáveis.
- *
- * Parsing de JSON, tratamento de domínio e
- * mensagens específicas permanecem nos serviços
- * consumidores.
+ * clone() é intencional para que a resposta original
+ * continue disponível ao consumidor caso não haja
+ * retry ou caso a segunda tentativa também falhe.
  */
-export async function apiFetch(
+async function isCsrfInvalidResponse(
+  response: Response
+): Promise<boolean> {
+  if (response.status !== 403) {
+    return false;
+  }
+
+  const body =
+    await response
+      .clone()
+      .json()
+      .catch(() => null) as
+        | ApiErrorResponse
+        | null;
+
+  return (
+    body !== null &&
+    typeof body === "object" &&
+    body.error !== null &&
+    typeof body.error === "object" &&
+    body.error?.code === "csrf_invalid"
+  );
+}
+
+/**
+ * Executa uma única tentativa HTTP.
+ *
+ * Para métodos protegidos, o token CSRF fornecido
+ * pelo cliente substitui qualquer valor enviado
+ * manualmente pelo chamador.
+ */
+async function performRequest(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit,
+  method: string,
+  csrfToken?: string
 ): Promise<Response> {
-  const method =
-    normalizeMethod(options.method);
-
   const headers =
-    new Headers(options.headers);
+    new Headers(
+      options.headers
+    );
 
-  if (
-    isCsrfProtectedMethod(method)
-  ) {
-    const csrfToken =
-      await getCsrfToken();
-
-    /**
-     * set(), e não append(), é intencional.
-     *
-     * O cliente HTTP é a fonte de verdade para
-     * esse header. Um chamador não pode deixar
-     * acidentalmente dois tokens ou reutilizar
-     * manualmente um valor antigo.
-     */
+  if (csrfToken !== undefined) {
     headers.set(
       "X-CSRF-Token",
       csrfToken
@@ -94,5 +115,79 @@ export async function apiFetch(
       credentials: "include",
       headers,
     }
+  );
+}
+
+/**
+ * Cliente HTTP para endpoints internos da
+ * Agenda Inteligente.
+ *
+ * Responsabilidades transversais:
+ *
+ * - resolver a URL pelo apiUrl();
+ * - sempre enviar cookies de sessão;
+ * - anexar automaticamente X-CSRF-Token
+ *   nas requisições mutáveis;
+ * - recuperar uma única vez de token CSRF obsoleto
+ *   quando o backend responder csrf_invalid.
+ *
+ * Parsing de JSON, tratamento de domínio e
+ * mensagens específicas permanecem nos serviços
+ * consumidores.
+ */
+export async function apiFetch(
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const method =
+    normalizeMethod(
+      options.method
+    );
+
+  const csrfProtected =
+    isCsrfProtectedMethod(
+      method
+    );
+
+  const csrfToken =
+    csrfProtected
+      ? await getCsrfToken()
+      : undefined;
+
+  const response =
+    await performRequest(
+      path,
+      options,
+      method,
+      csrfToken
+    );
+
+  if (
+    !csrfProtected ||
+    !(await isCsrfInvalidResponse(
+      response
+    ))
+  ) {
+    return response;
+  }
+
+  /**
+   * O token pode ter sido rotacionado por outra
+   * aba ou por uma mudança de sessão.
+   *
+   * O retry acontece exatamente uma vez. A resposta
+   * da segunda tentativa é devolvida diretamente,
+   * mesmo se também for csrf_invalid.
+   */
+  clearCsrfToken();
+
+  const refreshedCsrfToken =
+    await getCsrfToken();
+
+  return performRequest(
+    path,
+    options,
+    method,
+    refreshedCsrfToken
   );
 }
