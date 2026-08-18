@@ -292,6 +292,20 @@ $tests[
             ?? null,
         'Contato retornado está incorreto.'
     );
+
+    assertContactRepositorySame(
+        '2026-08-09T10:00:00.000Z',
+        $contacts[0]['created_at']
+            ?? null,
+        'created_at da listagem deveria estar em ISO 8601 UTC.'
+    );
+
+    assertContactRepositorySame(
+        '2026-08-09T10:00:00.000Z',
+        $contacts[0]['updated_at']
+            ?? null,
+        'updated_at da listagem deveria estar em ISO 8601 UTC.'
+    );
 };
 
 $tests[
@@ -722,6 +736,20 @@ $tests[
         'Contato Localizado',
         $contact['name'] ?? null,
         'Repository retornou contato incorreto.'
+    );
+
+    assertContactRepositorySame(
+        '2026-08-09T12:00:00.000Z',
+        $contact['created_at']
+            ?? null,
+        'created_at deveria estar em ISO 8601 UTC.'
+    );
+
+    assertContactRepositorySame(
+        '2026-08-09T12:00:00.000Z',
+        $contact['updated_at']
+            ?? null,
+        'updated_at deveria estar em ISO 8601 UTC.'
     );
 };
 

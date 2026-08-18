@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace AgendaInteligente\Infrastructure\Persistence;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use PDO;
 use RuntimeException;
 
@@ -62,9 +64,26 @@ final class ContactRepository
 
         $contacts = $statement->fetchAll();
 
-        return is_array($contacts)
-            ? $contacts
-            : [];
+        if (!is_array($contacts)) {
+            return [];
+        }
+
+        $normalizedContacts = [];
+
+        foreach ($contacts as $contact) {
+            if (!is_array($contact)) {
+                throw new RuntimeException(
+                    'Contato retornado pelo banco possui formato inválido.'
+                );
+            }
+
+            $normalizedContacts[] =
+                $this->normalizeContact(
+                    $contact
+                );
+        }
+
+        return $normalizedContacts;
     }
 
     /**
@@ -120,9 +139,13 @@ final class ContactRepository
 
         $contact = $statement->fetch();
 
-        return is_array($contact)
-            ? $contact
-            : null;
+        if (!is_array($contact)) {
+            return null;
+        }
+
+        return $this->normalizeContact(
+            $contact
+        );
     }
 
     /**
@@ -281,4 +304,65 @@ final class ContactRepository
         return $id;
     }
 
+    /**
+     * Normaliza os campos de um contato retornado
+     * pela persistência para o contrato HTTP.
+     *
+     * @param array<string, mixed> $contact
+     *
+     * @return array<string, mixed>
+     */
+    private function normalizeContact(
+        array $contact
+    ): array {
+        $contact['created_at'] =
+            $this->normalizeUtcTimestamp(
+                $contact['created_at']
+                    ?? null
+            );
+
+        $contact['updated_at'] =
+            $this->normalizeUtcTimestamp(
+                $contact['updated_at']
+                    ?? null
+            );
+
+        return $contact;
+    }
+
+    /**
+     * Converte DATETIME armazenado em UTC para
+     * a representação ISO 8601 usada pela API.
+     */
+    private function normalizeUtcTimestamp(
+        mixed $value
+    ): string {
+        if (!is_string($value)) {
+            throw new RuntimeException(
+                'Timestamp de contato inválido.'
+            );
+        }
+
+        $dateTime =
+            DateTimeImmutable::createFromFormat(
+                '!Y-m-d H:i:s',
+                $value,
+                new DateTimeZone('UTC')
+            );
+
+        if (
+            $dateTime === false
+            || $dateTime->format(
+                'Y-m-d H:i:s'
+            ) !== $value
+        ) {
+            throw new RuntimeException(
+                'Timestamp de contato inválido.'
+            );
+        }
+
+        return $dateTime->format(
+            'Y-m-d\TH:i:s.000\Z'
+        );
+    }
 }
