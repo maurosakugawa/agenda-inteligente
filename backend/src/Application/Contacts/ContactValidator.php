@@ -24,6 +24,36 @@ final class ContactValidator
 
     private const UF_MAX_CHARACTERS = 2;
 
+    private const VALID_UFS = [
+        'AC',
+        'AL',
+        'AP',
+        'AM',
+        'BA',
+        'CE',
+        'DF',
+        'ES',
+        'GO',
+        'MA',
+        'MT',
+        'MS',
+        'MG',
+        'PA',
+        'PB',
+        'PR',
+        'PE',
+        'PI',
+        'RJ',
+        'RN',
+        'RS',
+        'RO',
+        'RR',
+        'SC',
+        'SP',
+        'SE',
+        'TO',
+    ];
+
     public function validate(
         string $name,
         ?string $phone = null,
@@ -59,10 +89,18 @@ final class ContactValidator
             'E-mail'
         );
 
+        $this->validateEmail(
+            $email
+        );
+
         $this->validateOptionalString(
             $cep,
             self::CEP_MAX_CHARACTERS,
             'CEP'
+        );
+
+        $this->validateCep(
+            $cep
         );
 
         $this->validateOptionalString(
@@ -93,6 +131,10 @@ final class ContactValidator
             $uf,
             self::UF_MAX_CHARACTERS,
             'UF'
+        );
+
+        $this->validateUf(
+            $uf
         );
     }
 
@@ -131,6 +173,73 @@ final class ContactValidator
             $maximumCharacters,
             $field
         );
+    }
+
+    private function validateEmail(
+        ?string $email
+    ): void {
+        if (
+            $email === null
+            || $email === ''
+        ) {
+            return;
+        }
+
+        if (
+            filter_var(
+                $email,
+                FILTER_VALIDATE_EMAIL
+            ) === false
+        ) {
+            throw new InvalidContactInputException(
+                'E-mail possui formato inválido.'
+            );
+        }
+    }
+
+    private function validateCep(
+        ?string $cep
+    ): void {
+        if (
+            $cep === null
+            || $cep === ''
+        ) {
+            return;
+        }
+
+        if (
+            preg_match(
+                '/^[0-9]{5}-?[0-9]{3}$/D',
+                $cep
+            ) !== 1
+        ) {
+            throw new InvalidContactInputException(
+                'CEP possui formato inválido.'
+            );
+        }
+    }
+
+    private function validateUf(
+        ?string $uf
+    ): void {
+        if (
+            $uf === null
+            || $uf === ''
+        ) {
+            return;
+        }
+
+        if (
+            !in_array(
+                $uf,
+                self::VALID_UFS,
+                true
+            )
+        ) {
+            throw new InvalidContactInputException(
+                'UF inválida.'
+            );
+        }
     }
 
     private function isValidUtf8(
