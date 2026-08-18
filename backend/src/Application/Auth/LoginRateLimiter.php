@@ -36,6 +36,7 @@ final class LoginRateLimiter
     public function __construct(
         private RateLimitRepository $repository,
         private array $config,
+        private UsernameCanonicalizer $usernameCanonicalizer,
         ?Closure $clock = null
     ) {
         $this->clock =
@@ -184,9 +185,15 @@ final class LoginRateLimiter
         string $ip,
         string $username
     ): string {
+        $canonicalUsername =
+            $this->usernameCanonicalizer
+                ->canonicalize(
+                    $username
+                );
+
         return $this->keyHash(
             "username_ip\0"
-            . $username
+            . $canonicalUsername
             . "\0"
             . $ip
         );
