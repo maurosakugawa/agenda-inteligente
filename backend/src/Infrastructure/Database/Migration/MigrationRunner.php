@@ -15,6 +15,8 @@ final class MigrationRunner
 
     private SchemaMigrationStore $store;
 
+    private LegacyBaselineUpgrader $legacyBaselineUpgrader;
+
     private MigrationLock $lock;
 
     public function __construct(
@@ -32,6 +34,11 @@ final class MigrationRunner
 
         $this->store =
             new SchemaMigrationStore(
+                $pdo
+            );
+
+        $this->legacyBaselineUpgrader =
+            new LegacyBaselineUpgrader(
                 $pdo
             );
 
@@ -82,10 +89,45 @@ final class MigrationRunner
 
     private function runLocked(): int
     {
-        $this->store->ensureTable();
-
         $migrations =
             $this->discovery->discover();
+
+        $baseline =
+            $this->findLegacyBaseline(
+                $migrations
+            );
+
+        if (
+            $this->store->hasLegacyTable()
+        ) {
+            /*
+             * Ordem intencional:
+             *
+             * 1. validar/converter domínio;
+             * 2. somente depois promover o histórico.
+             *
+             * Nunca gravamos o checksum atual sobre um
+             * domínio antigo que não tenha convergido.
+             */
+            $this->legacyBaselineUpgrader
+                ->upgradeIfNeeded(
+                    $baseline
+                );
+
+            if ($baseline === null) {
+                throw new MigrationException(
+                    'Histórico legado detectado sem 001_initial_schema disponível.'
+                );
+            }
+
+            $this->store
+                ->upgradeLegacyTable(
+                    $baseline
+                );
+        } else {
+            $this->store
+                ->ensureTable();
+        }
 
         $pending =
             $this->planner->pending(
@@ -133,5 +175,28 @@ final class MigrationRunner
         }
 
         return $appliedCount;
+    }
+
+    /**
+     * Localiza exclusivamente a baseline histórica conhecida.
+     *
+     * Não assumimos que qualquer primeira migration possa
+     * promover um schema_migrations legado.
+     *
+     * @param list<MigrationFile> $migrations
+     */
+    private function findLegacyBaseline(
+        array $migrations
+    ): ?MigrationFile {
+        foreach ($migrations as $migration) {
+            if (
+                $migration->version()
+                === '001_initial_schema'
+            ) {
+                return $migration;
+            }
+        }
+
+        return null;
     }
 }

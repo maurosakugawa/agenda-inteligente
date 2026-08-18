@@ -8,10 +8,12 @@ use AgendaInteligente\Application\Auth\CredentialVerifier;
 use AgendaInteligente\Application\Auth\LoginController;
 use AgendaInteligente\Application\Auth\LoginRateLimiter;
 use AgendaInteligente\Application\Auth\RateLimitRepository;
+use AgendaInteligente\Application\Auth\UsernameCanonicalizer;
 use AgendaInteligente\Infrastructure\Database\Connection;
 use AgendaInteligente\Infrastructure\Http\Request;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\PasswordHasher;
+
 
 require_once dirname(__DIR__) . '/autoload.php';
 
@@ -200,6 +202,16 @@ final class LoginControllerRateLimitRepositoryFake
     }
 }
 
+final class LoginControllerUsernameCanonicalizerFake
+    implements UsernameCanonicalizer
+{
+    public function canonicalize(
+        string $username
+    ): string {
+        return $username;
+    }
+}
+
 /**
  * @return array{
  *     key_secret:string,
@@ -258,6 +270,7 @@ function createLoginControllerUnderTest(
         new LoginRateLimiter(
             $repository,
             loginControllerRateLimitConfig(),
+            new LoginControllerUsernameCanonicalizerFake(),
             static fn (): int => $now
         );
 

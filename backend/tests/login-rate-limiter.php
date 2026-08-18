@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use AgendaInteligente\Application\Auth\LoginRateLimiter;
 use AgendaInteligente\Application\Auth\RateLimitRepository;
+use AgendaInteligente\Application\Auth\UsernameCanonicalizer;
 
 require_once dirname(__DIR__) . '/autoload.php';
 
@@ -98,6 +99,28 @@ final class FakeLoginRateLimitRepository
             'scope' => $scope,
             'key_hash' => $keyHash,
         ];
+    }
+}
+
+final class FakeUsernameCanonicalizer
+    implements UsernameCanonicalizer
+{
+    public function canonicalize(
+        string $username
+    ): string {
+        return match ($username) {
+            'Alice',
+            'alice',
+            'ALICE' =>
+                'alice-canonical',
+
+            'José',
+            'Jose' =>
+                'jose-canonical',
+
+            default =>
+                $username,
+        };
     }
 }
 
@@ -211,6 +234,7 @@ $tests[
         new LoginRateLimiter(
             $repository,
             loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
             static fn (): int => $now
         );
 
@@ -283,6 +307,7 @@ $tests[
         new LoginRateLimiter(
             $repository,
             loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
             static fn (): int => $now
         );
 
@@ -310,6 +335,7 @@ $tests[
         new LoginRateLimiter(
             $repository,
             loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
             static fn (): int => $now
         );
 
@@ -365,6 +391,7 @@ $tests[
         new LoginRateLimiter(
             $repository,
             loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
             static fn (): int => $now
         );
 
@@ -411,6 +438,7 @@ $tests[
         new LoginRateLimiter(
             $repository,
             loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
             static fn (): int => 1800010000
         );
 
@@ -444,6 +472,117 @@ $tests[
 };
 
 $tests[
+    'variações de caixa compartilham bucket de username e IP'
+] = static function () use ($now): void {
+    $repository =
+        new FakeLoginRateLimitRepository();
+
+    $limiter =
+        new LoginRateLimiter(
+            $repository,
+            loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
+            static fn (): int => $now
+        );
+
+    foreach (
+        [
+            'Alice',
+            'alice',
+            'ALICE',
+        ] as $username
+    ) {
+        $limiter
+            ->recordCredentialFailure(
+                '203.0.113.50',
+                $username
+            );
+    }
+
+    assertLoginRateLimiterSame(
+        3,
+        count(
+            $repository
+                ->recordAttemptCalls
+        ),
+        'Deveriam existir três registros de tentativa.'
+    );
+
+    $firstHash =
+        $repository
+            ->recordAttemptCalls[0][
+                'key_hash'
+            ];
+
+    foreach (
+        $repository
+            ->recordAttemptCalls
+        as $call
+    ) {
+        assertLoginRateLimiterSame(
+            $firstHash,
+            $call['key_hash'],
+            'Usernames equivalentes por caixa deveriam compartilhar o mesmo bucket.'
+        );
+    }
+};
+
+$tests[
+    'variações de acento compartilham bucket de username e IP'
+] = static function () use ($now): void {
+    $repository =
+        new FakeLoginRateLimitRepository();
+
+    $limiter =
+        new LoginRateLimiter(
+            $repository,
+            loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
+            static fn (): int => $now
+        );
+
+    foreach (
+        [
+            'José',
+            'Jose',
+        ] as $username
+    ) {
+        $limiter
+            ->recordCredentialFailure(
+                '203.0.113.51',
+                $username
+            );
+    }
+
+    assertLoginRateLimiterSame(
+        2,
+        count(
+            $repository
+                ->recordAttemptCalls
+        ),
+        'Deveriam existir dois registros de tentativa.'
+    );
+
+    $firstHash =
+        $repository
+            ->recordAttemptCalls[0][
+                'key_hash'
+            ];
+
+    foreach (
+        $repository
+            ->recordAttemptCalls
+        as $call
+    ) {
+        assertLoginRateLimiterSame(
+            $firstHash,
+            $call['key_hash'],
+            'Usernames equivalentes pela collation deveriam compartilhar o mesmo bucket.'
+        );
+    }
+};
+
+$tests[
     'HMAC não persiste identificadores em claro'
 ] = static function () use ($now): void {
     $repository =
@@ -453,6 +592,7 @@ $tests[
         new LoginRateLimiter(
             $repository,
             loginRateLimiterConfig(),
+            new FakeUsernameCanonicalizer(),
             static fn (): int => $now
         );
 

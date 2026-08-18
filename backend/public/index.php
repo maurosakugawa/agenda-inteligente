@@ -32,6 +32,7 @@ use AgendaInteligente\Infrastructure\Http\Router;
 use AgendaInteligente\Infrastructure\Logging\ExceptionLogger;
 use AgendaInteligente\Infrastructure\Persistence\ContactRepository;
 use AgendaInteligente\Infrastructure\Persistence\MySqlRateLimitRepository;
+use AgendaInteligente\Infrastructure\Persistence\MySqlUsernameCanonicalizer;
 use AgendaInteligente\Infrastructure\Persistence\UserRepository;
 use AgendaInteligente\Infrastructure\Security\CsrfTokenManager;
 use AgendaInteligente\Infrastructure\Security\PasswordHasher;
@@ -276,7 +277,10 @@ try {
                     new MySqlRateLimitRepository(
                         $pdo
                     ),
-                    $loginRateLimitConfig
+                    $loginRateLimitConfig,
+                    new MySqlUsernameCanonicalizer(
+                        $pdo
+                    )
                 );
 
             $loginController = new LoginController(

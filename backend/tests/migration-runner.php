@@ -273,6 +273,7 @@ function resetRunnerDatabase(
     $pdo->exec(
         "
         DROP TABLE IF EXISTS
+            runner_legacy_followup,
             runner_double_failure,
             runner_lock_success,
             runner_lock_blocked,
@@ -287,6 +288,111 @@ function resetRunnerDatabase(
             schema_migrations
         "
     );
+}
+
+function dropRunnerDomainSchema(
+    PDO $pdo
+): void {
+    $pdo->exec(
+        'SET FOREIGN_KEY_CHECKS = 0'
+    );
+
+    try {
+        $pdo->exec(
+            "
+            DROP TABLE IF EXISTS
+                auth_rate_limits,
+                event_participants,
+                event_contacts,
+                events,
+                contacts,
+                weather_cache,
+                users,
+                schema_migrations
+            "
+        );
+    } finally {
+        $pdo->exec(
+            'SET FOREIGN_KEY_CHECKS = 1'
+        );
+    }
+}
+
+function restoreRunnerCurrentDomainSchema(
+    PDO $pdo
+): void {
+    dropRunnerDomainSchema(
+        $pdo
+    );
+
+    $root =
+        dirname(
+            __DIR__,
+            2
+        );
+
+    $initialSchemaPath =
+        $root
+        . '/database/migrations/001_initial_schema.sql';
+
+    $rateLimitPath =
+        $root
+        . '/database/migrations/002_create_auth_rate_limits.sql';
+
+    $initialSchema =
+        file_get_contents(
+            $initialSchemaPath
+        );
+
+    $rateLimitSchema =
+        file_get_contents(
+            $rateLimitPath
+        );
+
+    if (
+        $initialSchema === false
+        || $rateLimitSchema === false
+    ) {
+        throw new RuntimeException(
+            'Não foi possível carregar schema atual para restaurar o banco de testes.'
+        );
+    }
+
+    $pdo->exec(
+        $initialSchema
+    );
+
+    $pdo->exec(
+        $rateLimitSchema
+    );
+}
+
+function runnerColumnExists(
+    PDO $pdo,
+    string $tableName,
+    string $columnName
+): bool {
+    $statement =
+        $pdo->prepare(
+            "
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = :table_name
+              AND COLUMN_NAME = :column_name
+            "
+        );
+
+    $statement->execute([
+        ':table_name' =>
+            $tableName,
+        ':column_name' =>
+            $columnName,
+    ]);
+
+    return
+        (int) $statement->fetchColumn()
+        === 1;
 }
 
 function runnerTableExists(
@@ -743,6 +849,568 @@ $tests[
 
         removeRunnerMigrationDirectory(
             $directory
+        );
+    }
+};
+
+$tests[
+    'rejeita histórico legado sem schema de domínio conhecido'
+] = static function () use (
+    $pdo
+): void {
+    resetRunnerDatabase(
+        $pdo
+    );
+
+    dropRunnerDomainSchema(
+        $pdo
+    );
+
+    $directory =
+        createRunnerMigrationDirectory();
+
+    $baselineSql =
+        "-- baseline histórica já aplicada\n";
+
+    $followupSql =
+        "CREATE TABLE runner_legacy_followup (\n"
+        . "    id INT NOT NULL PRIMARY KEY\n"
+        . ") ENGINE=InnoDB;\n";
+
+    try {
+        writeRunnerMigration(
+            $directory,
+            '001_initial_schema.sql',
+            $baselineSql
+        );
+
+        writeRunnerMigration(
+            $directory,
+            '002_legacy_followup.sql',
+            $followupSql
+        );
+
+        $pdo->exec(
+            "
+            CREATE TABLE schema_migrations (
+                version VARCHAR(100) NOT NULL,
+                executed_at DATETIME NOT NULL
+                    DEFAULT CURRENT_TIMESTAMP,
+
+                PRIMARY KEY (version)
+            ) ENGINE=InnoDB
+              DEFAULT CHARSET=utf8mb4
+              COLLATE=utf8mb4_unicode_ci
+            "
+        );
+
+        $pdo->exec(
+            "
+            INSERT INTO schema_migrations (
+                version
+            ) VALUES (
+                '001_initial_schema'
+            )
+            "
+        );
+
+        $runner =
+            new MigrationRunner(
+                $pdo,
+                $directory
+            );
+
+        $failure = null;
+
+        try {
+            $runner->run();
+        } catch (MigrationException $exception) {
+            $failure =
+                $exception;
+        }
+
+        assertRunnerTrue(
+            $failure instanceof MigrationException,
+            'Runner deveria rejeitar histórico legado sem domínio correspondente.'
+        );
+
+        assertRunnerTrue(
+            str_contains(
+                $failure->getMessage(),
+                'users'
+            ),
+            'Erro deveria identificar a ausência da tabela users da baseline conhecida.'
+        );
+
+        assertRunnerTrue(
+            !runnerTableExists(
+                $pdo,
+                'runner_legacy_followup'
+            ),
+            'Migration posterior não deveria executar em schema legado incompleto.'
+        );
+
+        assertRunnerTrue(
+            !runnerColumnExists(
+                $pdo,
+                'schema_migrations',
+                'checksum'
+            ),
+            'Histórico legado incompleto não deveria ser promovido.'
+        );
+    } finally {
+        resetRunnerDatabase(
+            $pdo
+        );
+
+        removeRunnerMigrationDirectory(
+            $directory
+        );
+
+        restoreRunnerCurrentDomainSchema(
+            $pdo
+        );
+    }
+};
+
+$tests[
+    'upgrade legado produz schema de domínio atual antes de migrations posteriores'
+] = static function () use (
+    $pdo
+): void {
+    resetRunnerDatabase(
+        $pdo
+    );
+
+    $directory =
+        createRunnerMigrationDirectory();
+
+    $root =
+        dirname(
+            __DIR__,
+            2
+        );
+
+    $legacySchemaPath =
+        __DIR__
+        . '/fixtures/migrations/001_initial_schema_legacy.sql';
+
+    $currentInitialPath =
+        $root
+        . '/database/migrations/001_initial_schema.sql';
+
+    $currentSecondPath =
+        $root
+        . '/database/migrations/002_create_auth_rate_limits.sql';
+
+    $legacySchema =
+        file_get_contents(
+            $legacySchemaPath
+        );
+
+    $currentInitial =
+        file_get_contents(
+            $currentInitialPath
+        );
+
+    $currentSecond =
+        file_get_contents(
+            $currentSecondPath
+        );
+
+    if (
+        $legacySchema === false
+        || $currentInitial === false
+        || $currentSecond === false
+    ) {
+        throw new RuntimeException(
+            'Não foi possível carregar migrations para teste do upgrade legado.'
+        );
+    }
+
+    try {
+        /*
+         * Reconstrói uma instalação real criada
+         * pelo 001 histórico.
+         */
+        dropRunnerDomainSchema(
+            $pdo
+        );
+
+        $pdo->exec(
+            $legacySchema
+        );
+
+        /*
+         * O runner representa a versão atual
+         * da aplicação.
+         */
+        writeRunnerMigration(
+            $directory,
+            '001_initial_schema.sql',
+            $currentInitial
+        );
+
+        writeRunnerMigration(
+            $directory,
+            '002_create_auth_rate_limits.sql',
+            $currentSecond
+        );
+
+        $runner =
+            new MigrationRunner(
+                $pdo,
+                $directory
+            );
+
+        assertRunnerSame(
+            1,
+            $runner->run(),
+            'Após promover a baseline, somente 002 deveria ser contabilizada como migration normal.'
+        );
+
+        /*
+         * USERS
+         */
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'users',
+                'active'
+            ),
+            'Upgrade legado deveria criar users.active.'
+        );
+
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'users',
+                'deleted_at'
+            ),
+            'Upgrade legado deveria criar users.deleted_at.'
+        );
+
+        /*
+         * CONTACTS
+         */
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'contacts',
+                'cep'
+            ),
+            'Upgrade legado deveria converter contacts.postal_code para cep.'
+        );
+
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'contacts',
+                'logradouro'
+            ),
+            'Upgrade legado deveria criar contacts.logradouro.'
+        );
+
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'contacts',
+                'cidade'
+            ),
+            'Upgrade legado deveria criar contacts.cidade.'
+        );
+
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'contacts',
+                'uf'
+            ),
+            'Upgrade legado deveria criar contacts.uf.'
+        );
+
+        /*
+         * EVENTS
+         */
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'events',
+                'event_date'
+            ),
+            'Upgrade legado deveria criar events.event_date.'
+        );
+
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'events',
+                'event_time'
+            ),
+            'Upgrade legado deveria criar events.event_time.'
+        );
+
+        /*
+         * Relação evento/contato.
+         */
+        assertRunnerTrue(
+            runnerTableExists(
+                $pdo,
+                'event_contacts'
+            ),
+            'Upgrade legado deveria possuir event_contacts.'
+        );
+
+        assertRunnerTrue(
+            !runnerTableExists(
+                $pdo,
+                'event_participants'
+            ),
+            'Tabela legada event_participants deveria deixar de existir.'
+        );
+
+        /*
+         * Migration posterior.
+         */
+        assertRunnerTrue(
+            runnerTableExists(
+                $pdo,
+                'auth_rate_limits'
+            ),
+            '002_create_auth_rate_limits deveria ser aplicada após o upgrade.'
+        );
+
+        /*
+         * Segunda execução continua idempotente.
+         */
+        assertRunnerSame(
+            0,
+            $runner->run(),
+            'Runner não deveria repetir upgrade ou migrations após convergência.'
+        );
+    } finally {
+        removeRunnerMigrationDirectory(
+            $directory
+        );
+
+        restoreRunnerCurrentDomainSchema(
+            $pdo
+        );
+    }
+};
+
+$tests[
+    'recusa upgrade automático de baseline legada com dados de domínio'
+] = static function () use (
+    $pdo
+): void {
+    resetRunnerDatabase(
+        $pdo
+    );
+
+    $directory =
+        createRunnerMigrationDirectory();
+
+    $root =
+        dirname(
+            __DIR__,
+            2
+        );
+
+    $legacySchemaPath =
+        __DIR__
+        . '/fixtures/migrations/001_initial_schema_legacy.sql';
+
+    $currentInitialPath =
+        $root
+        . '/database/migrations/001_initial_schema.sql';
+
+    $currentSecondPath =
+        $root
+        . '/database/migrations/002_create_auth_rate_limits.sql';
+
+    $legacySchema =
+        file_get_contents(
+            $legacySchemaPath
+        );
+
+    $currentInitial =
+        file_get_contents(
+            $currentInitialPath
+        );
+
+    $currentSecond =
+        file_get_contents(
+            $currentSecondPath
+        );
+
+    if (
+        $legacySchema === false
+        || $currentInitial === false
+        || $currentSecond === false
+    ) {
+        throw new RuntimeException(
+            'Não foi possível carregar migrations para teste do upgrade legado.'
+        );
+    }
+
+    try {
+        dropRunnerDomainSchema(
+            $pdo
+        );
+
+        $pdo->exec(
+            $legacySchema
+        );
+
+        /*
+         * Um único registro já torna destrutiva
+         * qualquer reconstrução automática do schema.
+         */
+        $passwordHash =
+            password_hash(
+                'senha-legada',
+                PASSWORD_DEFAULT
+            );
+
+        if (!is_string($passwordHash)) {
+            throw new RuntimeException(
+                'Não foi possível criar hash do fixture legado.'
+            );
+        }
+
+        $statement =
+            $pdo->prepare(
+                "
+                INSERT INTO users (
+                    name,
+                    username,
+                    email,
+                    password_hash,
+                    status
+                )
+                VALUES (
+                    :name,
+                    :username,
+                    :email,
+                    :password_hash,
+                    'active'
+                )
+                "
+            );
+
+        $statement->execute([
+            ':name' =>
+                'Usuário Legado',
+            ':username' =>
+                'usuario_legado',
+            ':email' =>
+                'legado@example.test',
+            ':password_hash' =>
+                $passwordHash,
+        ]);
+
+        writeRunnerMigration(
+            $directory,
+            '001_initial_schema.sql',
+            $currentInitial
+        );
+
+        writeRunnerMigration(
+            $directory,
+            '002_create_auth_rate_limits.sql',
+            $currentSecond
+        );
+
+        $runner =
+            new MigrationRunner(
+                $pdo,
+                $directory
+            );
+
+        $failure = null;
+
+        try {
+            $runner->run();
+        } catch (MigrationException $exception) {
+            $failure =
+                $exception;
+        }
+
+        assertRunnerTrue(
+            $failure instanceof MigrationException,
+            'Runner deveria recusar upgrade automático com dados legados.'
+        );
+
+        assertRunnerTrue(
+            str_contains(
+                $failure->getMessage(),
+                'dados'
+            ),
+            'Erro deveria informar que existem dados no schema legado.'
+        );
+
+        /*
+         * Nenhum dado pode ser destruído.
+         */
+        $legacyUserCount =
+            (int) $pdo
+                ->query(
+                    'SELECT COUNT(*) FROM users'
+                )
+                ->fetchColumn();
+
+        assertRunnerSame(
+            1,
+            $legacyUserCount,
+            'Usuário legado deveria permanecer intacto após recusa.'
+        );
+
+        assertRunnerTrue(
+            runnerColumnExists(
+                $pdo,
+                'users',
+                'status'
+            ),
+            'Schema legado deveria permanecer intacto após recusa.'
+        );
+
+        assertRunnerTrue(
+            !runnerColumnExists(
+                $pdo,
+                'users',
+                'active'
+            ),
+            'Runner não deveria iniciar conversão parcial do domínio.'
+        );
+
+        assertRunnerTrue(
+            !runnerTableExists(
+                $pdo,
+                'auth_rate_limits'
+            ),
+            'Migration 002 não deveria executar após recusa do upgrade.'
+        );
+
+        /*
+         * Também não devemos ter carimbado o checksum atual
+         * no histórico legado.
+         */
+        assertRunnerTrue(
+            !runnerColumnExists(
+                $pdo,
+                'schema_migrations',
+                'checksum'
+            ),
+            'Histórico não deveria ser promovido antes do domínio.'
+        );
+    } finally {
+        removeRunnerMigrationDirectory(
+            $directory
+        );
+
+        restoreRunnerCurrentDomainSchema(
+            $pdo
         );
     }
 };
